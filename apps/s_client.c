@@ -48,6 +48,8 @@ typedef unsigned int u_int;
 #include "timeouts.h"
 #include "internal/sockets.h"
 
+#include <time.h>
+
 #if defined(__has_feature)
 # if __has_feature(memory_sanitizer)
 #  include <sanitizer/msan_interface.h>
@@ -969,6 +971,8 @@ int s_client_main(int argc, char **argv)
     int is_infinite;
     BIO_ADDR *peer_addr = NULL;
     struct user_data_st user_data;
+
+    struct timeval start_time, end_time;
 
     FD_ZERO(&readfds);
     FD_ZERO(&writefds);
@@ -2259,6 +2263,7 @@ int s_client_main(int argc, char **argv)
     if (tfo)
         BIO_printf(bio_c_out, "Connecting via TFO\n");
  re_start:
+    gettimeofday(&start_time, NULL);
     /* peer_addr might be set from previous connections */
     BIO_ADDR_free(peer_addr);
     peer_addr = NULL;
@@ -3012,6 +3017,10 @@ int s_client_main(int argc, char **argv)
         } else {
             tty_on = 1;
             if (in_init) {
+                gettimeofday(&end_time, NULL);
+                long ms = (end_time.tv_sec - start_time.tv_sec) * 1000000L
+                          + (end_time.tv_usec - start_time.tv_usec);
+                fprintf(stderr, "HANDSHAKE,%.3f\n", ms / 1000.0); fflush(stderr);
                 in_init = 0;
                 if (c_brief) {
                     BIO_puts(bio_err, "CONNECTION ESTABLISHED\n");
