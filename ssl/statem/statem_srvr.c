@@ -1514,6 +1514,8 @@ static void ssl_check_for_safari(SSL_CONNECTION *s,
 
 MSG_PROCESS_RETURN tls_process_client_hello(SSL_CONNECTION *s, PACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+
     /* |cookie| will only be initialized for DTLS. */
     PACKET session_id, compression, extensions, cookie;
     static const unsigned char null_compression = 0;
@@ -1713,6 +1715,13 @@ MSG_PROCESS_RETURN tls_process_client_hello(SSL_CONNECTION *s, PACKET *pkt)
         goto err;
     }
     s->clienthello = clienthello;
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+
+    printf("\n=========================================================\n\n");
+    fprintf(stderr, "[TIMING] Process ClientHello: %lu us\n", (unsigned long)elapsed);
+    printf("\n=========================================================\n");
 
     return MSG_PROCESS_CONTINUE_PROCESSING;
 
@@ -2316,8 +2325,6 @@ int tls_handle_alpn(SSL_CONNECTION *s)
 
 WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
 {
-    OSSL_TIME start = ossl_time_now();
-
     const SSL_CIPHER *cipher;
     SSL *ssl = SSL_CONNECTION_GET_SSL(s);
     SSL *ussl = SSL_CONNECTION_GET_USER_SSL(s);
@@ -2431,12 +2438,6 @@ WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
         }
     }
 #endif
-
-    OSSL_TIME end = ossl_time_now();
-    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
-    printf("\n=========================================================\n\n");
-    fprintf(stderr, "[TIMING] Post-process ClientHello: %lu us\n", (unsigned long)elapsed);
-    printf("\n=========================================================\n");
 
     return WORK_FINISHED_STOP;
  err:
