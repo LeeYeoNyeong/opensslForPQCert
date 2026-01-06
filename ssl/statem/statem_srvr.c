@@ -28,6 +28,8 @@
 #include <openssl/asn1t.h>
 #include <openssl/comp.h>
 
+#include <time.h>
+
 #define TICKET_NONCE_SIZE       8
 
 typedef struct {
@@ -2435,6 +2437,8 @@ WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
 
 CON_FUNC_RETURN tls_construct_server_hello(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+
     int compm;
     size_t sl, len;
     int version;
@@ -2539,6 +2543,13 @@ CON_FUNC_RETURN tls_construct_server_hello(SSL_CONNECTION *s, WPACKET *pkt)
         /* SSLfatal() already called */;
         return CON_FUNC_ERROR;
     }
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+
+    printf("\n=========================================================\n\n");
+    fprintf(stderr, "[TIMING] Construct ServerHello: %lu ms\n", (unsigned long)elapsed);
+    printf("\n=========================================================\n");
 
     return CON_FUNC_SUCCESS;
 }
@@ -3856,6 +3867,8 @@ MSG_PROCESS_RETURN tls_process_client_compressed_certificate(SSL_CONNECTION *sc,
 
 CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+
     CERT_PKEY *cpk = s->s3.tmp.cert;
 
     if (cpk == NULL) {
@@ -3905,6 +3918,13 @@ CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
     }
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+
+    printf("\n=========================================================\n\n");
+    fprintf(stderr, "[TIMING] Construct Server Certificate: %lu ms\n", (unsigned long)elapsed);
+    printf("\n=========================================================\n");
 
     return CON_FUNC_SUCCESS;
 }

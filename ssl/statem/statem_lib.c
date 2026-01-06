@@ -321,6 +321,8 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
 
 CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+
     EVP_PKEY *pkey = NULL;
     const EVP_MD *md = NULL;
     EVP_MD_CTX *mctx = NULL;
@@ -437,6 +439,14 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             
     OPENSSL_free(sig);
     EVP_MD_CTX_free(mctx);
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+
+    printf("\n=========================================================\n\n");
+    fprintf(stderr, "[TIMING] Construct CertificateVerify: %lu ms\n", (unsigned long)elapsed);
+    printf("\n=========================================================\n");
+
     return CON_FUNC_SUCCESS;
  err:
     OPENSSL_free(sig);
@@ -448,6 +458,8 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 }
 CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+
     EVP_PKEY *pq_pkey = NULL;
     EVP_MD_CTX *pq_mctx = EVP_MD_CTX_new();
     EVP_PKEY_CTX *pq_pctx = NULL;
@@ -564,6 +576,14 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 end:
     EVP_MD_CTX_free(pq_mctx);
     OPENSSL_free(pq_sig);
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+
+    printf("\n=========================================================\n\n");
+    fprintf(stderr, "[TIMING] Construct PQCertificateVerify: %lu ms\n", (unsigned long)elapsed);
+    printf("\n=========================================================\n");
+
     return ret;
 }
 
@@ -886,6 +906,8 @@ end:
 
 CON_FUNC_RETURN tls_construct_finished(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+
     size_t finish_md_len;
     const char *sender;
     size_t slen;
@@ -962,6 +984,13 @@ CON_FUNC_RETURN tls_construct_finished(SSL_CONNECTION *s, WPACKET *pkt)
                finish_md_len);
         s->s3.previous_server_finished_len = finish_md_len;
     }
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+
+    printf("\n=========================================================\n\n");
+    fprintf(stderr, "[TIMING] Construct Finished: %lu ms\n", (unsigned long)elapsed);
+    printf("\n=========================================================\n");
 
     return CON_FUNC_SUCCESS;
 }
