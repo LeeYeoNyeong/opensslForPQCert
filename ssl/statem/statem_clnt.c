@@ -2211,6 +2211,24 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
         return WORK_MORE_A;
 
     /*
+     * Verify PQC certificate chain if dual certificates are enabled
+     */
+    if (s->session->dual_certs_enabled && s->session->peer_pqc_chain != NULL
+        && sk_X509_num(s->session->peer_pqc_chain) > 0) {
+        ERR_set_mark();
+        int pqc_verify_result = ssl_verify_cert_chain(s, s->session->peer_pqc_chain);
+        if (pqc_verify_result <= 0 && s->verify_mode != SSL_VERIFY_NONE) {
+            ERR_clear_last_mark();
+            SSLfatal(s, ssl_x509err2alert(s->verify_result),
+                     SSL_R_CERTIFICATE_VERIFY_FAILED);
+            return WORK_ERROR;
+        }
+        ERR_pop_to_mark();
+        if (pqc_verify_result > 0 && s->rwstate == SSL_RETRY_VERIFY)
+            return WORK_MORE_A;
+    }
+
+    /*
      * Inconsistency alert: cert_chain does include the peer's certificate,
      * which we don't include in statem_srvr.c
      */
@@ -2250,7 +2268,14 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
     EVP_PKEY_free(s->session->peer_rpk);
     s->session->peer_rpk = NULL;
 
-    /* Check for RelatedCertificate extension in PQC certificates if dual certs are enabled */
+    /* Optionally check for RelatedCertificate extension in PQC certificates if dual certs are enabled.
+     * 
+     * NOTE: This is a secondary, non-fatal validation. Primary validation occurs
+     * in parse_related_certificate_cb() during TLS extension parsing, which is
+     * strict and will fail the handshake if the extension is present but invalid.
+     * 
+     * This check here is informational and does not interrupt the handshake.
+     */
     if (s->session->dual_certs_enabled && s->session->peer_pqc_chain) {
         int pqc_chain_len = sk_X509_num(s->session->peer_pqc_chain);
         
@@ -2288,7 +2313,10 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
             
             OPENSSL_free(der);
             
-            /* Compare the calculated hash with the hash in the extension */
+            /* Compare the calculated hash with the hash in the extension.
+             * Note: This is a non-fatal check - we continue even if validation fails.
+             * Strict validation is performed in parse_related_certificate_cb().
+             */
             if (hashlen != (unsigned int)rc->hashValue->length) {
                 RELATED_CERTIFICATE_free(rc);
                 continue;

@@ -465,6 +465,10 @@ static int check_dual(X509_STORE *ctx, const char *file1, const char *file2,
         goto end;
     }
     
+    /* Set verify callback to handle self-signed certificates */
+    X509_STORE_set_verify_cb(store1, cb);
+    X509_STORE_set_verify_cb(store2, cb);
+    
     /* Load CA certificates into respective stores */
     if (classicCAfile != NULL) {
         STACK_OF(X509) *classic_ca_certs = NULL;
@@ -503,6 +507,22 @@ static int check_dual(X509_STORE *ctx, const char *file1, const char *file2,
         OSSL_STACK_OF_X509_free(pq_ca_certs);
     }
     
+    /* Check if certificates are self-signed */
+    int cert1_is_self_signed = X509_self_signed(x1, 0);
+    int cert2_is_self_signed = X509_self_signed(x2, 0);
+    
+    /* Handle errors in self-signed check */
+    if (cert1_is_self_signed < 0) {
+        BIO_printf(bio_err, "Error checking if first certificate is self-signed\n");
+        ERR_print_errors(bio_err);
+        goto end;
+    }
+    if (cert2_is_self_signed < 0) {
+        BIO_printf(bio_err, "Error checking if second certificate is self-signed\n");
+        ERR_print_errors(bio_err);
+        goto end;
+    }
+    
     /* Verify first certificate with classic CA */
     BIO_printf(bio_out, "Verifying first certificate: %s\n", file1);
     csc1 = X509_STORE_CTX_new();
@@ -519,12 +539,28 @@ static int check_dual(X509_STORE *ctx, const char *file1, const char *file2,
     if (crls != NULL)
         X509_STORE_CTX_set0_crls(csc1, crls);
     
+    /* For self-signed certificates, set flag to check signature */
+    if (cert1_is_self_signed > 0) {
+        X509_VERIFY_PARAM *param = X509_STORE_CTX_get0_param(csc1);
+        if (param != NULL) {
+            unsigned long flags = X509_VERIFY_PARAM_get_flags(param);
+            X509_VERIFY_PARAM_set_flags(param, flags | X509_V_FLAG_CHECK_SS_SIGNATURE);
+        }
+    }
+    
     int result1 = X509_verify_cert(csc1);
     if (result1 > 0) {
         BIO_printf(bio_out, "%s: OK\n", file1);
     } else {
-        BIO_printf(bio_err, "%s: verification failed\n", file1);
-        ERR_print_errors(bio_err);
+        int cert1_error = X509_STORE_CTX_get_error(csc1);
+        /* Allow self-signed certificates */
+        if (cert1_error == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT && cert1_is_self_signed > 0) {
+            BIO_printf(bio_out, "%s: OK (self-signed certificate)\n", file1);
+            result1 = 1; /* Treat as success */
+        } else {
+            BIO_printf(bio_err, "%s: verification failed\n", file1);
+            ERR_print_errors(bio_err);
+        }
     }
     
     /* Verify second certificate with PQC CA */
@@ -543,12 +579,28 @@ static int check_dual(X509_STORE *ctx, const char *file1, const char *file2,
     if (crls != NULL)
         X509_STORE_CTX_set0_crls(csc2, crls);
     
+    /* For self-signed certificates, set flag to check signature */
+    if (cert2_is_self_signed > 0) {
+        X509_VERIFY_PARAM *param = X509_STORE_CTX_get0_param(csc2);
+        if (param != NULL) {
+            unsigned long flags = X509_VERIFY_PARAM_get_flags(param);
+            X509_VERIFY_PARAM_set_flags(param, flags | X509_V_FLAG_CHECK_SS_SIGNATURE);
+        }
+    }
+    
     int result2 = X509_verify_cert(csc2);
     if (result2 > 0) {
         BIO_printf(bio_out, "%s: OK\n", file2);
     } else {
-        BIO_printf(bio_err, "%s: verification failed\n", file2);
-        ERR_print_errors(bio_err);
+        int cert2_error = X509_STORE_CTX_get_error(csc2);
+        /* Allow self-signed certificates */
+        if (cert2_error == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT && cert2_is_self_signed > 0) {
+            BIO_printf(bio_out, "%s: OK (self-signed certificate)\n", file2);
+            result2 = 1; /* Treat as success */
+        } else {
+            BIO_printf(bio_err, "%s: verification failed\n", file2);
+            ERR_print_errors(bio_err);
+        }
     }
     
     /* Both certificates must be valid for dual verification to succeed */

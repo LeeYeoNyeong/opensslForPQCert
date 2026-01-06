@@ -3814,12 +3814,28 @@ static int verify_dual_certificates_internal(X509_STORE_CTX *ctx, X509 *cert1, X
     if (ctx->param)
         X509_STORE_CTX_set0_param(cert1_ctx, ctx->param);
     
+    /* Check if cert1 is self-signed and handle accordingly */
+    int cert1_is_self_signed = X509_self_signed(cert1, 0);
+    if (cert1_is_self_signed > 0) {
+        /* For self-signed certificates, set flag to check signature */
+        X509_VERIFY_PARAM *param = X509_STORE_CTX_get0_param(cert1_ctx);
+        if (param != NULL) {
+            unsigned long flags = X509_VERIFY_PARAM_get_flags(param);
+            X509_VERIFY_PARAM_set_flags(param, flags | X509_V_FLAG_CHECK_SS_SIGNATURE);
+        }
+    }
+    
     if (X509_verify_cert(cert1_ctx) <= 0) {
         int cert1_error = X509_STORE_CTX_get_error(cert1_ctx);
-        ERR_raise(ERR_LIB_X509, X509_R_CERTIFICATE_VERIFICATION_FAILED);
-        ctx->error = cert1_error;
-        ctx->error_depth = X509_STORE_CTX_get_error_depth(cert1_ctx);
-        goto err;
+        /* Allow self-signed certificates */
+        if (cert1_error == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT && cert1_is_self_signed > 0) {
+            /* Self-signed certificate is acceptable */
+        } else {
+            ERR_raise(ERR_LIB_X509, X509_R_CERTIFICATE_VERIFICATION_FAILED);
+            ctx->error = cert1_error;
+            ctx->error_depth = X509_STORE_CTX_get_error_depth(cert1_ctx);
+            goto err;
+        }
     }
     
     /* Validate second certificate */
@@ -3840,12 +3856,28 @@ static int verify_dual_certificates_internal(X509_STORE_CTX *ctx, X509 *cert1, X
     if (ctx->param)
         X509_STORE_CTX_set0_param(cert2_ctx, ctx->param);
     
+    /* Check if cert2 is self-signed and handle accordingly */
+    int cert2_is_self_signed = X509_self_signed(cert2, 0);
+    if (cert2_is_self_signed > 0) {
+        /* For self-signed certificates, set flag to check signature */
+        X509_VERIFY_PARAM *param = X509_STORE_CTX_get0_param(cert2_ctx);
+        if (param != NULL) {
+            unsigned long flags = X509_VERIFY_PARAM_get_flags(param);
+            X509_VERIFY_PARAM_set_flags(param, flags | X509_V_FLAG_CHECK_SS_SIGNATURE);
+        }
+    }
+    
     if (X509_verify_cert(cert2_ctx) <= 0) {
         int cert2_error = X509_STORE_CTX_get_error(cert2_ctx);
-        ERR_raise(ERR_LIB_X509, X509_R_CERTIFICATE_VERIFICATION_FAILED);
-        ctx->error = cert2_error;
-        ctx->error_depth = X509_STORE_CTX_get_error_depth(cert2_ctx);
-        goto err;
+        /* Allow self-signed certificates */
+        if (cert2_error == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT && cert2_is_self_signed > 0) {
+            /* Self-signed certificate is acceptable */
+        } else {
+            ERR_raise(ERR_LIB_X509, X509_R_CERTIFICATE_VERIFICATION_FAILED);
+            ctx->error = cert2_error;
+            ctx->error_depth = X509_STORE_CTX_get_error_depth(cert2_ctx);
+            goto err;
+        }
     }
     
     /* Check RelatedCertificate extension if present */

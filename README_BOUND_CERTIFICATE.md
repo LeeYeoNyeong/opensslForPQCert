@@ -195,19 +195,6 @@ openssl s_client -connect localhost:4433 \
 ```
 
 
-### Step 6: Results Analysis
-
-#### 6.1 Expected TLS Messages
-
-The TLS 1.3 handshake should proceed as follows:
-
-1. **ClientHello** → **ServerHello**
-2. **EncryptedExtensions**
-3. **Certificate** (contains the RelatedCertificate extension)
-4. **CertificateVerify**
-5. **PQCertificateVerify**
-6. **Finished** (successful exchange)
-
 
 
 

@@ -30,6 +30,20 @@ The implementation provides a complete solution for creating and using dual cert
 **Features**
 
 
+**Self-Signed Certificate Support**
+
+The implementation now fully supports self-signed certificates in dual certificate mode:
+
+- **Automatic Detection**: The verification process automatically detects self-signed certificates
+- **Signature Verification**: Self-signed certificates are verified using their own public key
+- **TLS Handshake**: Self-signed certificates work seamlessly in TLS handshakes
+- **Dual Mode**: Both classic and PQC self-signed certificates are supported simultaneously
+
+This is particularly useful for:
+- Development and testing environments
+- Internal networks without CA infrastructure
+- Prototyping and proof-of-concept implementations
+
 **Implemented Components**
 
 
@@ -139,7 +153,31 @@ openssl x509 -req -in server_mldsa65_req.pem \
 
 ```
 
-### Step 3: Test Dual Certificate Usage
+### Step 3: Generate Self-Signed Dual Certificates
+
+For testing purposes or development environments, you can create self-signed dual certificates without a CA:
+
+```bash
+# Generate self-signed classic certificate (RSA)
+openssl genpkey -algorithm RSA -out server_rsa_self_key.pem
+
+# Create self-signed classic certificate
+openssl req -new -x509 -key server_rsa_self_key.pem \
+  -out server_rsa_self_cert.pem -days 365 \
+  -subj "/C=US/ST=CA/L=San Francisco/O=TestOrg/CN=server.example.com"
+
+# Generate self-signed PQC certificate (mldsa65)
+openssl genpkey -algorithm mldsa65 -out server_mldsa65_self_key.pem
+
+# Create self-signed PQC certificate
+openssl req -new -x509 -key server_mldsa65_self_key.pem \
+  -out server_mldsa65_self_cert.pem -days 365 \
+  -subj "/C=US/ST=CA/L=San Francisco/O=TestOrg/CN=server.example.com"
+```
+
+**Note:** Self-signed certificates are now fully supported in the dual certificate implementation. The verification process will automatically detect and accept self-signed certificates when they are properly formatted.
+
+### Step 4: Test Dual Certificate Usage
 
 ```bash
 # Verify classic certificate
@@ -147,16 +185,66 @@ openssl x509 -in server_classic_cert.pem -text -noout
 
 # Verify PQC certificate
 openssl x509 -in server_pq_cert.pem -text -noout
+
+# Verify self-signed classic certificate
+openssl x509 -in server_rsa_self_cert.pem -text -noout
+
+# Verify self-signed PQC certificate
+openssl x509 -in server_mldsa65_self_cert.pem -text -noout
 ```
 
-### Step 4: verification de certificat dual avec verify
+### Step 5: Verification of dual certificate with verify
+
+#### 5.1 Verification with CA-signed certificates
+
 ```bash
-openssl verify -dual -CAfile opensslForPQCert/test_dual_tls/ca_rsa.pem -pqcafile a_mldsa44_cert.pem server_rsa_cert.pem server_mldsa44_cert.pem
+# Verify dual certificates signed by CAs
+openssl verify -dual \
+  -CAfile ca_rsa.pem \
+  -pqcafile ca_mldsa65_cert.pem \
+  server_rsa_cert.pem \
+  server_mldsa65_cert.pem
 ```
 
-### Step 5: TLS Handshake Testing
+#### 5.2 Verification with self-signed certificates
 
-#### 5.1 Starting the OpenSSL Server
+
+```bash
+# Verify self-signed dual certificates
+openssl verify -dual \
+  -CAfile server_rsa_self_cert.pem \
+  -pqcafile server_mldsa65_self_cert.pem \
+  server_rsa_self_cert.pem \
+  server_mldsa65_self_cert.pem
+```
+
+
+### Step 6: TLS Handshake Testing
+
+#### 6.1 Starting the OpenSSL Server with self-signed certificates
+
+
+```bash
+# Start the TLS server with self-signed dual certificates
+openssl s_server \
+  -cert server_rsa_self_cert.pem \
+  -key server_rsa_self_key.pem \
+  -pqcert server_mldsa65_self_cert.pem \
+  -pqkey server_mldsa65_self_key.pem \
+  -enable_dual_certs \
+  -msg -debug
+```
+
+```bash
+# Connect to server with self-signed dual certificates
+openssl s_client -connect localhost:4433 \
+  -CAfile server_rsa_self_cert.pem \
+  -pqcafile server_mldsa65_self_cert.pem \
+  -enable_dual_certs \
+  -msg -debug
+```
+
+#### 6.3 Starting the OpenSSL Server with CA-signed certificates
 
 ```bash
 # Start the TLS server with dual certificates
@@ -170,18 +258,8 @@ openssl s_server \
   -enable_dual_certs \
   -msg -debug
 
-```
 
-Options used:
-- `-cert server_rsa_cert.pem` : Classic server certificate
-- `-key server_rsa_key.pem` : Classic server private key
-- `-pqcert server_mldsa65_cert.pem` : PQC server certificate
-- `-pqkey server_mldsa65_key.pem` : PQC server private key
-- `-enable_dual_certs` : Enable dual certificate mode
-- `-CAfile ca_rsa.pem` : Classic CA certificate for validation
-- `-pqcafile ca_mldsa65_cert.pem` : PQC CA certificate for validation
-
-#### 5.2 Connecting the OpenSSL Client
+#### Connecting the OpenSSL Client
 
 ```bash
 # In another terminal, connect a TLS client
@@ -192,25 +270,8 @@ openssl s_client -connect localhost:4433 \
 
 ```
 
-Options used:
-- `-connect localhost:4433` : Connect to local server
-- `-CAfile ca_rsa.pem` : Classic CA certificate for validation
-- `-pqcafile ca_mldsa65_cert.pem` : PQC CA certificate for validation
-- `-enable_dual_certs` : Enable dual certificate mode
-- `-msg` : Display detailed TLS messages
 
-### Step 3: Results Analysis
 
-#### 3.1 Expected TLS Messages
-
-The TLS 1.3 handshake should proceed as follows:
-
-1. **ClientHello** → **ServerHello**
-2. **EncryptedExtensions**
-3. **Certificate** (contains both classic and PQC certificate chains)
-4. **CertificateVerify** (contains classic signature)
-5. **PQCertificateVerify** (contains PQC signature)
-6. **Finished** (successful exchange)
 
 
 

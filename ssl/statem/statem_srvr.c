@@ -3895,12 +3895,13 @@ CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt
     case TLSEXT_cert_type_x509:
         /* Check if dual certificate mode is enabled */
         if (s->cert->dual_certs_enabled && s->cert->pqkey != NULL) {
-            /* Format according to IETF draft: 
+            /* Format according to IETF draft (dual certificate specification):
              * Certificate chain format:
              * - Length of classic certificate chain (3 bytes)
-             * - Classic certificate chain
-             * - Length of PQ certificate chain (3 bytes) 
-             * - PQ certificate chain
+             * - Classic certificate chain (one or more certificates)
+             * - Delimiter: certificate of length 0 (3 bytes = 0x000000)
+             * - Length of PQ certificate chain (3 bytes)
+             * - PQ certificate chain (one or more certificates)
              */
             if (!ssl3_output_cert_chain_with_delimiter(s, pkt, cpk, 0)) {
                 return 0;
