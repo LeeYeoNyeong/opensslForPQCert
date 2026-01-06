@@ -2545,10 +2545,10 @@ CON_FUNC_RETURN tls_construct_server_hello(SSL_CONNECTION *s, WPACKET *pkt)
     }
 
     OSSL_TIME end = ossl_time_now();
-    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
 
     printf("\n=========================================================\n\n");
-    fprintf(stderr, "[TIMING] Construct ServerHello: %lu ms\n", (unsigned long)elapsed);
+    fprintf(stderr, "[TIMING] Construct ServerHello: %lu us\n", (unsigned long)elapsed);
     printf("\n=========================================================\n");
 
     return CON_FUNC_SUCCESS;
@@ -3921,10 +3921,10 @@ CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt
     }
 
     OSSL_TIME end = ossl_time_now();
-    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
 
     printf("\n=========================================================\n\n");
-    fprintf(stderr, "[TIMING] Construct Server Certificate: %lu ms\n", (unsigned long)elapsed);
+    fprintf(stderr, "[TIMING] Construct Server Certificate: %lu us\n", (unsigned long)elapsed);
     printf("\n=========================================================\n");
 
     return CON_FUNC_SUCCESS;

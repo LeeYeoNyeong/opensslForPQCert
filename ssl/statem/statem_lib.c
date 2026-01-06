@@ -441,10 +441,10 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     EVP_MD_CTX_free(mctx);
 
     OSSL_TIME end = ossl_time_now();
-    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
 
     printf("\n=========================================================\n\n");
-    fprintf(stderr, "[TIMING] Construct CertificateVerify: %lu ms\n", (unsigned long)elapsed);
+    fprintf(stderr, "[TIMING] Construct CertificateVerify: %lu us\n", (unsigned long)elapsed);
     printf("\n=========================================================\n");
 
     return CON_FUNC_SUCCESS;
@@ -578,10 +578,10 @@ end:
     OPENSSL_free(pq_sig);
 
     OSSL_TIME end = ossl_time_now();
-    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
 
     printf("\n=========================================================\n\n");
-    fprintf(stderr, "[TIMING] Construct PQCertificateVerify: %lu ms\n", (unsigned long)elapsed);
+    fprintf(stderr, "[TIMING] Construct PQCertificateVerify: %lu us\n", (unsigned long)elapsed);
     printf("\n=========================================================\n");
 
     return ret;
@@ -986,10 +986,10 @@ CON_FUNC_RETURN tls_construct_finished(SSL_CONNECTION *s, WPACKET *pkt)
     }
 
     OSSL_TIME end = ossl_time_now();
-    uint64_t elapsed = ossl_time2ms(ossl_time_subtract(end, start));
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
 
     printf("\n=========================================================\n\n");
-    fprintf(stderr, "[TIMING] Construct Finished: %lu ms\n", (unsigned long)elapsed);
+    fprintf(stderr, "[TIMING] Construct Finished: %lu us\n", (unsigned long)elapsed);
     printf("\n=========================================================\n");
 
     return CON_FUNC_SUCCESS;
