@@ -587,3 +587,4 @@ SSL_set_hybrid_cert_hint                587	3_3_0	EXIST::FUNCTION:
 SSL_set_hybrid_cert_hint_list           588	3_3_0	EXIST::FUNCTION:
 SSL_set_server_hybrid_cert_type         589	3_3_0	EXIST::FUNCTION:
 SSL_set_hybrid_private_key              590	3_3_0	EXIST::FUNCTION:
+SSL_CTX_set_hybrid_private_key          ?	3_3_4	EXIST::FUNCTION:

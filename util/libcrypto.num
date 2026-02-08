@@ -5552,3 +5552,14 @@ verify_dcd_signature                    ?	3_3_4	EXIST::FUNCTION:
 X509_get_alt_pubkey                     ?	3_3_4	EXIST::FUNCTION:
 ALT_SIGNATURE_sign                      ?	3_3_4	EXIST::FUNCTION:
 X509v3_alt_sig_validate_path            ?	3_3_4	EXIST::FUNCTION:
+DeltaValidity_new                       ?	3_3_4	EXIST::FUNCTION:
+DeltaValidity_free                      ?	3_3_4	EXIST::FUNCTION:
+DeltaValidity_it                        ?	3_3_4	EXIST::FUNCTION:
+DeltaCertificateDescriptor_new          ?	3_3_4	EXIST::FUNCTION:
+DeltaCertificateDescriptor_free         ?	3_3_4	EXIST::FUNCTION:
+DeltaCertificateDescriptor_it           ?	3_3_4	EXIST::FUNCTION:
+create_delta_certificate_descriptor     ?	3_3_4	EXIST::FUNCTION:
+d2i_DeltaValidity                       ?	3_3_4	EXIST::FUNCTION:
+i2d_DeltaValidity                       ?	3_3_4	EXIST::FUNCTION:
+d2i_DeltaCertificateDescriptor          ?	3_3_4	EXIST::FUNCTION:
+i2d_DeltaCertificateDescriptor          ?	3_3_4	EXIST::FUNCTION:

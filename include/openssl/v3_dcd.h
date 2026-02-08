@@ -1,7 +1,12 @@
 #ifndef OPENSSL_V3_DCD_H
 #define OPENSSL_V3_DCD_H
 
+#include <openssl/macros.h>
 #include <openssl/x509.h>
+
+# ifdef __cplusplus
+extern "C" {
+# endif
 
 typedef struct DeltaValidity_st {
     ASN1_TIME *notBefore;
@@ -29,5 +34,9 @@ ASN1_OCTET_STRING *create_delta_certificate_descriptor(X509 *base_cert,
 
 DECLARE_ASN1_FUNCTIONS(DeltaValidity)
 DECLARE_ASN1_FUNCTIONS(DeltaCertificateDescriptor)
+
+# ifdef __cplusplus
+}
+# endif
 
 #endif
