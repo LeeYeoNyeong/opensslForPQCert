@@ -2353,18 +2353,51 @@ int s_server_main(int argc, char *argv[])
             goto end;
         }
         
-        /* Load PQC certificate */
-        pqc_cert_obj = load_cert_pass(pqc_cert, FORMAT_PEM, 1, pass, "PQC certificate");
-        if (pqc_cert_obj == NULL) {
+        /* Load PQC certificate(s) - support fullchain files */
+        STACK_OF(X509) *pqc_certs_all = NULL;
+        if (!load_certs(pqc_cert, 0, &pqc_certs_all, pass, "PQC certificate")) {
             BIO_printf(bio_err, "Error loading PQC certificate\n");
             goto end;
         }
+        
+        if (sk_X509_num(pqc_certs_all) < 1) {
+            BIO_printf(bio_err, "No PQC certificates found in file\n");
+            sk_X509_pop_free(pqc_certs_all, X509_free);
+            goto end;
+        }
+        
+        /* First certificate is the server certificate */
+        pqc_cert_obj = sk_X509_value(pqc_certs_all, 0);
+        X509_up_ref(pqc_cert_obj);  /* Increase reference count */
+        
+        /* Remaining certificates (if any) are intermediate CAs */
+        if (sk_X509_num(pqc_certs_all) > 1) {
+            pqc_chain = sk_X509_new_null();
+            if (pqc_chain == NULL) {
+                BIO_printf(bio_err, "Error creating PQC chain\n");
+                X509_free(pqc_cert_obj);
+                sk_X509_pop_free(pqc_certs_all, X509_free);
+                goto end;
+            }
+            
+            for (int i = 1; i < sk_X509_num(pqc_certs_all); i++) {
+                X509 *ca_cert = sk_X509_value(pqc_certs_all, i);
+                X509_up_ref(ca_cert);
+                sk_X509_push(pqc_chain, ca_cert);
+            }
+            
+            BIO_printf(bio_s_out, "Loaded %d PQC intermediate certificate(s) from chain\n", 
+                       sk_X509_num(pqc_chain));
+        }
+        
+        sk_X509_pop_free(pqc_certs_all, X509_free);
         
         /* Load PQC private key */
         pqc_key_obj = load_key(pqc_key, FORMAT_PEM, 0, pass, engine, "PQC private key");
         if (pqc_key_obj == NULL) {
             BIO_printf(bio_err, "Error loading PQC private key\n");
             X509_free(pqc_cert_obj);
+            sk_X509_pop_free(pqc_chain, X509_free);
             goto end;
         }
         

@@ -701,9 +701,18 @@ static int ssl_verify_internal(SSL_CONNECTION *s, STACK_OF(X509) *sk, EVP_PKEY *
         if (first_cert != NULL) {
             EVP_PKEY *pkey = X509_get0_pubkey(first_cert);
             if (pkey != NULL) {
-                int nid = EVP_PKEY_id(pkey);
-                if (nid >= 1000) {
-                    verify_store = s->cert->pq_verify_store;
+                const char *key_type_name = EVP_PKEY_get0_type_name(pkey);
+                
+                /* Check if this is a PQC algorithm */
+                if (key_type_name != NULL) {
+                    int is_pqc = (strstr(key_type_name, "mldsa") != NULL ||
+                                 strstr(key_type_name, "dilithium") != NULL ||
+                                 strstr(key_type_name, "falcon") != NULL ||
+                                 strstr(key_type_name, "sphincs") != NULL);
+                    
+                    if (is_pqc) {
+                        verify_store = s->cert->pq_verify_store;
+                    }
                 }
             }
         }

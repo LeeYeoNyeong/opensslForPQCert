@@ -8027,7 +8027,7 @@ int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF
     EVP_PKEY *pubkey;
     size_t i;
 
-    if (ctx == NULL || cert == NULL || key == NULL) {
+    if (ctx == NULL) {
         ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
         return 0;
     }
@@ -8042,6 +8042,9 @@ int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF
         ERR_raise(ERR_LIB_SSL, SSL_R_DUAL_CERTS_NOT_ENABLED);
         return 0;
     }
+
+    /* Allow NULL cert/key for client-only verification (only setting up CA chain) */
+    if (cert != NULL && key != NULL) {
 
     /* Get the public key from the certificate */
     pubkey = X509_get0_pubkey(cert);
@@ -8092,6 +8095,7 @@ int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF
         ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         return 0;
     }
+    }  /* End of cert/key != NULL block */
 
     /* Create PQC verify store if not exists */
     if (ctx->cert->pq_verify_store == NULL) {

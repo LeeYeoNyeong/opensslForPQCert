@@ -1794,46 +1794,37 @@ int s_client_main(int argc, char **argv)
     EVP_PKEY *pqkey = NULL;
     STACK_OF(X509) *pqchain = NULL;
     
+    /* Load PQC CA file if specified - needed for both client cert and server verification */
+    if (pqcafile != NULL) {
+        if (!load_certs(pqcafile, 0, &pqchain, NULL, "PQC CA certificates")) {
+            BIO_printf(bio_err, "Error loading PQC CA certificates from %s\n", pqcafile);
+            goto end;
+        }
+    }
+    
     if (enable_dual_certs) {
-        if (pqcert_file == NULL) {
-            BIO_printf(bio_err, "Error: -enable_dual_certs requires -pqcert option\n");
-            goto end;
-        }
-        if (pqkey_file == NULL) {
-            BIO_printf(bio_err, "Error: -enable_dual_certs requires -pqkey option\n");
-            goto end;
-        }
-        
-        /* Load PQC certificate */
-        pqcert = load_cert_pass(pqcert_file, cert_format, 1, pass,
-                                "post-quantum certificate");
-        if (pqcert == NULL)
-            goto end;
-            
-        /* Load PQC private key */
-        pqkey = load_key(pqkey_file, key_format, 0, pass, e,
-                         "post-quantum certificate private key");
-        if (pqkey == NULL)
-            goto end;
-            
-        /* Load PQC CA file if specified */
-        if (pqcafile != NULL) {
-            STACK_OF(X509) *pqca_chain = NULL;
-            if (!load_certs(pqcafile, 0, &pqca_chain, NULL, "PQC CA certificates")) {
-                BIO_printf(bio_err, "Error loading PQC CA certificates from %s\n", pqcafile);
+        /* For client with PQC certificate (mutual TLS) */
+        if (pqcert_file != NULL || pqkey_file != NULL) {
+            if (pqcert_file == NULL) {
+                BIO_printf(bio_err, "Error: -pqkey requires -pqcert option\n");
                 goto end;
             }
-            /* Use PQC CA chain for PQC certificate validation */
-            pqchain = pqca_chain;
-        } else {
-            /* For now, we'll use the same chain for PQC certificate */
-            if (chain != NULL) {
-                pqchain = sk_X509_dup(chain);
-                if (pqchain == NULL) {
-                    BIO_printf(bio_err, "Error duplicating certificate chain for PQC\n");
-                    goto end;
-                }
+            if (pqkey_file == NULL) {
+                BIO_printf(bio_err, "Error: -pqcert requires -pqkey option\n");
+                goto end;
             }
+            
+            /* Load PQC certificate */
+            pqcert = load_cert_pass(pqcert_file, cert_format, 1, pass,
+                                    "post-quantum certificate");
+            if (pqcert == NULL)
+                goto end;
+                
+            /* Load PQC private key */
+            pqkey = load_key(pqkey_file, key_format, 0, pass, e,
+                             "post-quantum certificate private key");
+            if (pqkey == NULL)
+                goto end;
         }
     }
 
@@ -2123,6 +2114,15 @@ int s_client_main(int argc, char **argv)
             ERR_print_errors(bio_err);
             goto end;
             }
+        } else if (pqchain != NULL) {
+            /* Client has no PQC certificate but has PQC CA for server verification */
+            /* Call SSL_CTX_set_pq_certificate with NULL cert/key to add CA to verify store */
+            if (!SSL_CTX_set_pq_certificate(ctx, NULL, NULL, pqchain)) {
+                BIO_printf(bio_err, "Error setting PQC CA certificates\n");
+                ERR_print_errors(bio_err);
+                goto end;
+            }
+            BIO_printf(bio_err, "PQC CA certificates added to verify store\n");
         }
         
         BIO_printf(bio_err, "Dual certificate mode enabled\n");
