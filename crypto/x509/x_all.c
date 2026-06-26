@@ -91,17 +91,33 @@ int X509_sign_ctx(X509 *x, EVP_MD_CTX *ctx)
         return 0;
     x->cert_info.enc.modified = 1;
 
-//alternative signature
-    EVP_MD_CTX* ctxCpy = EVP_MD_CTX_create();
-    EVP_MD_CTX_copy(ctxCpy, ctx);
-    ASN1_item_sign_ctx(ASN1_ITEM_rptr(X509_CINF),
-                              &x->cert_info.signature,
-                              &x->sig_alg, &x->signature, &x->cert_info, ctxCpy);
+    /*
+     * Catalyst alternative-signature certificates carry an altSignatureValue
+     * extension.  For those, the inner "signature" and outer signatureAlgorithm
+     * must already hold the final native algorithm when ALT_SIGNATURE_sign()
+     * encodes the TBSCertificate.  Achieve that with a provisional native sign
+     * over a COPY of ctx (the original ctx is reused for the final sign below,
+     * and one-shot signing may finalize a ctx); the signature it produces is
+     * overwritten by the final sign.  Ordinary certificates skip this entirely,
+     * so signing is unaffected for keys whose signing ctx cannot be duplicated.
+     */
+    if (X509_get_ext_by_NID(x, NID_alt_signature_value, -1) >= 0) {
+        EVP_MD_CTX *ctxCpy = EVP_MD_CTX_new();
 
-    // create the inner signature, if it is required
-    ALT_SIGNATURE_sign(x);
+        if (ctxCpy == NULL)
+            return 0;
+        if (EVP_MD_CTX_copy(ctxCpy, ctx) <= 0
+                || ASN1_item_sign_ctx(ASN1_ITEM_rptr(X509_CINF),
+                                      &x->cert_info.signature, &x->sig_alg,
+                                      &x->signature, &x->cert_info, ctxCpy) <= 0) {
+            EVP_MD_CTX_free(ctxCpy);
+            return 0;
+        }
+        EVP_MD_CTX_free(ctxCpy);
 
-
+        /* compute the alternative signature with the distinct alt key */
+        ALT_SIGNATURE_sign(x);
+    }
 
     return ASN1_item_sign_ctx(ASN1_ITEM_rptr(X509_CINF),
                               &x->cert_info.signature,
