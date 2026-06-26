@@ -8153,44 +8153,10 @@ KEY_TYPE get_key_type_from_evp_pkey(const EVP_PKEY *pkey) {
         case EVP_PKEY_ED25519: 
             result = KEY_TYPE_ED25519;
             break;
-        case EVP_PKEY_ED448: 
+        case EVP_PKEY_ED448:
             result = KEY_TYPE_ED448;
             break;
-        // PQC NIDs (à adapter selon vos définitions)
-#ifdef NID_dilithium2
-        case NID_dilithium2:
-#endif
-#ifdef NID_dilithium3
-        case NID_dilithium3:
-#endif
-
-#ifdef NID_falcon512
-        case NID_falcon512:
-#endif
-#ifdef NID_falcon1024
-        case NID_falcon1024:
-#endif
-            result = KEY_TYPE_FALCON;
-            break;
-#ifdef NID_sphincs_sha256_128f_robust
-        case NID_sphincs_sha256_128f_robust:
-#endif
-#ifdef NID_sphincs_sha256_192f_robust
-        case NID_sphincs_sha256_192f_robust:
-#endif
-#ifdef NID_sphincs_sha256_256f_robust
-        case NID_sphincs_sha256_256f_robust:
-#endif
-            result = KEY_TYPE_SPHINCS;
-            break;
-#ifdef NID_mldsa_44
-        case NID_mldsa_44:
-#endif
-#ifdef NID_mldsa_65
-        case NID_mldsa_65:
-#endif
-            result = KEY_TYPE_MLDSA;
-            break;
+        /* PQC keys carry no legacy NID; detected by name/size below. */
         default:
             /* Enhanced detection for unknown NIDs */
             if (nid == -1) {

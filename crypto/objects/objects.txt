@@ -1876,3 +1876,11 @@ oracle 746875 1 1 : oracle-jdk-trustedkeyusage : Trusted key usage (Oracle)
 !Cname id-pe-relatedCert
 1 3 6 1 5 5 7 1 36: relatedCertificate : X509v3 Bound certificate extension
 
+# Chameleon Delta Certificate (single-cert hybrid)
+# Temporary Arc Base OID
+!Cname id-temporaryArc
+2 16 840 1 114027 80 6 : temporaryArc : Temporary Arc Base
+
+!Cname id-ce-deltaCertificateDescriptor
+id-temporaryArc 1 : deltaCertificateDescriptor : X509v3 Delta Certificate Descriptor
+

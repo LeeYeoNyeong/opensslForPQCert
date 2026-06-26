@@ -1320,3 +1320,5 @@ associated_information		1319
 id_ct_rpkiSignedPrefixList		1320
 id_aa_relatedCertRequest		1321
 id_pe_relatedCert		1322
+id_temporaryArc		1323
+id_ce_deltaCertificateDescriptor		1324
