@@ -5554,3 +5554,6 @@ RELATED_CERTIFICATE_free                5680    3_3_0   EXIST::FUNCTION:
 RELATED_CERTIFICATE_new                 5681    3_3_0   EXIST::FUNCTION:
 d2i_RELATED_CERTIFICATE                 5682    3_3_0   EXIST::FUNCTION:
 i2d_RELATED_CERTIFICATE                 5683    3_3_0   EXIST::FUNCTION:
+X509_get_alt_pubkey                     5684    3_3_0   EXIST::FUNCTION:
+ALT_SIGNATURE_sign                      5685    3_3_0   EXIST::FUNCTION:
+X509v3_alt_sig_validate_path            5686    3_3_0   EXIST::FUNCTION:
