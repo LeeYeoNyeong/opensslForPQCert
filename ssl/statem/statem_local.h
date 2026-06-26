@@ -613,6 +613,18 @@ int tls_parse_ctos_dual_sig_algs(SSL_CONNECTION *s, PACKET *pkt,
 int tls_parse_stoc_dual_sig_algs(SSL_CONNECTION *s, PACKET *pkt,
                                  unsigned int context, X509 *x, size_t chainidx);
 
+/* Hybrid certificate capability flag extension functions */
+EXT_RETURN tls_construct_ctos_hybrid_cert(SSL_CONNECTION *s, WPACKET *pkt,
+                                          unsigned int context, X509 *x,
+                                          size_t chainidx);
+EXT_RETURN tls_construct_stoc_hybrid_cert(SSL_CONNECTION *s, WPACKET *pkt,
+                                          unsigned int context, X509 *x,
+                                          size_t chainidx);
+int tls_parse_ctos_hybrid_cert(SSL_CONNECTION *s, PACKET *pkt,
+                               unsigned int context, X509 *x, size_t chainidx);
+int tls_parse_stoc_hybrid_cert(SSL_CONNECTION *s, PACKET *pkt,
+                               unsigned int context, X509 *x, size_t chainidx);
+
 /* Dual signature algorithms validation functions */
 int is_valid_classic_signature_algorithm(uint16_t sigalg);
 int is_valid_pq_signature_algorithm(uint16_t sigalg);

@@ -712,6 +712,7 @@ typedef enum tlsext_index_en {
     TLSEXT_IDX_compress_certificate,
     TLSEXT_IDX_early_data,
     TLSEXT_IDX_certificate_authorities,
+    TLSEXT_IDX_hybrid_cert,
     TLSEXT_IDX_padding,
     TLSEXT_IDX_psk,
     TLSEXT_IDX_dual_signature_algorithms,
@@ -1393,6 +1394,12 @@ struct ssl_connection_st {
             /* Size of above dual signature algorithm arrays */
             size_t peer_dual_sigalgslen;
             size_t peer_dual_pq_sigalgslen;
+            /*
+             * Set when the peer sent the hybrid_cert capability flag: on the
+             * server it means the client advertised it in ClientHello; on the
+             * client it means the server echoed it in EncryptedExtensions.
+             */
+            int hybrid_cert;
             /* Sigalg peer actually uses */
             const struct sigalg_lookup_st *peer_sigalg;
             /*

@@ -1277,6 +1277,51 @@ int tls_parse_ctos_post_handshake_auth(SSL_CONNECTION *s, PACKET *pkt,
     return 1;
 }
 
+int tls_parse_ctos_hybrid_cert(SSL_CONNECTION *s, PACKET *pkt,
+                               ossl_unused unsigned int context,
+                               ossl_unused X509 *x,
+                               ossl_unused size_t chainidx)
+{
+    /* Capability flag: the body MUST be empty. */
+    if (PACKET_remaining(pkt) != 0) {
+        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
+        return 0;
+    }
+
+    /* Record that the client advertised hybrid-certificate capability. */
+    s->s3.tmp.hybrid_cert = 1;
+
+    return 1;
+}
+
+EXT_RETURN tls_construct_stoc_hybrid_cert(SSL_CONNECTION *s, WPACKET *pkt,
+                                          ossl_unused unsigned int context,
+                                          ossl_unused X509 *x,
+                                          ossl_unused size_t chainidx)
+{
+#ifndef OPENSSL_NO_TLS1_3
+    /*
+     * Echo the capability flag only when hybrid authentication is negotiated:
+     * the client advertised it (s3.tmp.hybrid_cert) and this server is
+     * configured with a hybrid certificate. Sent in EncryptedExtensions
+     * because TLS 1.3 does not permit this extension in ServerHello.
+     */
+    if (!s->s3.tmp.hybrid_cert || !s->cert->hybrid_cert_enabled)
+        return EXT_RETURN_NOT_SENT;
+
+    if (!WPACKET_put_bytes_u16(pkt, TLSEXT_TYPE_hybrid_cert)
+            || !WPACKET_start_sub_packet_u16(pkt)
+            || !WPACKET_close(pkt)) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        return EXT_RETURN_FAIL;
+    }
+
+    return EXT_RETURN_SENT;
+#else
+    return EXT_RETURN_NOT_SENT;
+#endif
+}
+
 /*
  * Add the server's renegotiation binding
  */

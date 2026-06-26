@@ -1213,6 +1213,55 @@ EXT_RETURN tls_construct_ctos_post_handshake_auth(SSL_CONNECTION *s, WPACKET *pk
 #endif
 }
 
+EXT_RETURN tls_construct_ctos_hybrid_cert(SSL_CONNECTION *s, WPACKET *pkt,
+                                          ossl_unused unsigned int context,
+                                          ossl_unused X509 *x,
+                                          ossl_unused size_t chainidx)
+{
+#ifndef OPENSSL_NO_TLS1_3
+    /*
+     * Advertise hybrid-certificate capability only if this endpoint is
+     * configured for hybrid certificates. The payload is empty: the extension
+     * is a pure capability flag and carries no format or algorithm data
+     * (algorithms are negotiated through signature_algorithms).
+     */
+    if (!s->cert->hybrid_cert_enabled)
+        return EXT_RETURN_NOT_SENT;
+
+    if (!WPACKET_put_bytes_u16(pkt, TLSEXT_TYPE_hybrid_cert)
+            || !WPACKET_start_sub_packet_u16(pkt)
+            || !WPACKET_close(pkt)) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        return EXT_RETURN_FAIL;
+    }
+
+    return EXT_RETURN_SENT;
+#else
+    return EXT_RETURN_NOT_SENT;
+#endif
+}
+
+int tls_parse_stoc_hybrid_cert(SSL_CONNECTION *s, PACKET *pkt,
+                               ossl_unused unsigned int context,
+                               ossl_unused X509 *x,
+                               ossl_unused size_t chainidx)
+{
+    /* Capability-flag echo: the body MUST be empty. */
+    if (PACKET_remaining(pkt) != 0) {
+        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
+        return 0;
+    }
+
+    /*
+     * The extension framework only dispatches a server extension that the
+     * client actually offered, so reaching here means the server echoed our
+     * hybrid_cert flag: hybrid authentication has been negotiated.
+     */
+    s->s3.tmp.hybrid_cert = 1;
+
+    return 1;
+}
+
 
 /*
  * Parse the server's renegotiation binding and abort if it's not right

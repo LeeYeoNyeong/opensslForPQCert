@@ -166,6 +166,14 @@ extern "C" {
  * such as transparency_info (52, RFC 9162). key_share is restored to 51.
  */
 # define TLSEXT_TYPE_dual_signature_algorithms   0xff50
+/*
+ * Hybrid-certificate capability flag (zero-length payload), in the TLS
+ * ExtensionType private-use range (65280-65535, RFC 8446). The client
+ * advertises it in ClientHello; the server echoes it in EncryptedExtensions
+ * (TLS 1.3 does not permit this extension in ServerHello). It carries no
+ * format/algorithm data: algorithms are negotiated via signature_algorithms.
+ */
+# define TLSEXT_TYPE_hybrid_cert                 0xff51
 
 /* Temporary extension type */
 # define TLSEXT_TYPE_renegotiate                 0xff01

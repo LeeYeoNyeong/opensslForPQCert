@@ -42,6 +42,7 @@ static int init_sig_algs_cert(SSL_CONNECTION *s, unsigned int context);
 static int init_sig_algs(SSL_CONNECTION *s, unsigned int context);
 static int init_dual_sig_algs(SSL_CONNECTION *s, unsigned int context);
 static int final_dual_sig_algs(SSL_CONNECTION *s, unsigned int context, int sent);
+static int init_hybrid_cert(SSL_CONNECTION *s, unsigned int context);
 static int init_server_cert_type(SSL_CONNECTION *sc, unsigned int context);
 static int init_client_cert_type(SSL_CONNECTION *sc, unsigned int context);
 static int init_certificate_authorities(SSL_CONNECTION *s,
@@ -421,6 +422,19 @@ static const EXTENSION_DEFINITION ext_defs[] = {
         tls_parse_certificate_authorities, tls_parse_certificate_authorities,
         tls_construct_certificate_authorities,
         tls_construct_certificate_authorities, NULL,
+    },
+    {
+        /*
+         * Must precede padding/pre_shared_key: this is a ClientHello
+         * extension and pre_shared_key has to remain the last one, while
+         * padding must stay immediately before pre_shared_key.
+         */
+        TLSEXT_TYPE_hybrid_cert,
+        SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS
+        | SSL_EXT_TLS1_3_ONLY,
+        init_hybrid_cert, tls_parse_ctos_hybrid_cert,
+        tls_parse_stoc_hybrid_cert, tls_construct_stoc_hybrid_cert,
+        tls_construct_ctos_hybrid_cert, NULL
     },
     {
         /* Must be immediately before pre_shared_key */
@@ -1967,6 +1981,13 @@ static int final_dual_sig_algs(SSL_CONNECTION *s, unsigned int context, int sent
 {
     /* For TLS 1.3, the dual signature algorithms extension is optional */
     /* No dual security compatibility check anymore */
+    return 1;
+}
+
+static int init_hybrid_cert(SSL_CONNECTION *s, unsigned int context)
+{
+    /* Reset the per-handshake "peer advertised hybrid_cert" flag. */
+    s->s3.tmp.hybrid_cert = 0;
     return 1;
 }
 
