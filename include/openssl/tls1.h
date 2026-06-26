@@ -157,9 +157,15 @@ extern "C" {
 # define TLSEXT_TYPE_certificate_authorities     47
 # define TLSEXT_TYPE_post_handshake_auth         49
 # define TLSEXT_TYPE_signature_algorithms_cert   50
-# define TLSEXT_TYPE_dual_signature_algorithms   51
-# define TLSEXT_TYPE_key_share                   52
+# define TLSEXT_TYPE_key_share                   51
 # define TLSEXT_TYPE_quic_transport_parameters   57
+/*
+ * Transient placement only: dual_signature_algorithms is removed later in
+ * Phase 4b. Until then it is parked in the TLS ExtensionType private-use range
+ * (65280-65535, RFC 8446) so it cannot collide with an IANA-allocated codepoint
+ * such as transparency_info (52, RFC 9162). key_share is restored to 51.
+ */
+# define TLSEXT_TYPE_dual_signature_algorithms   0xff50
 
 /* Temporary extension type */
 # define TLSEXT_TYPE_renegotiate                 0xff01
