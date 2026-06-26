@@ -632,7 +632,6 @@ X509 *reconstruct_delta(X509 *base, DeltaCertificateDescriptor *dcd) {
 }
 
 int verify_dcd_signature(X509 *cert, X509_STORE *store, STACK_OF(X509) *untrusted) {
-    printf("[DEBUG] verify_dcd_signature called\n");
     int ok = 0;
     int crit = -1;
     DeltaCertificateDescriptor *dcd =
@@ -641,19 +640,14 @@ int verify_dcd_signature(X509 *cert, X509_STORE *store, STACK_OF(X509) *untruste
         fprintf(stderr, "No DeltaCertificateDescriptor or missing public key\n");
         return 0;
     }
-    printf("[DEBUG] DCD extracted successfully\n");
 
     X509 *delta = reconstruct_delta(cert, dcd);
     if (!delta) {
-      fprintf(stderr, "[DEBUG] Failed to reconstruct delta certificate\n");
       DeltaCertificateDescriptor_free(dcd);
         return 0;
     }
-    printf("[DEBUG] Delta certificate reconstructed successfully\n");
     
     /* Restore full logic */
-    printf("[DEBUG] Checking store: %p, untrusted: %p (count: %d)\n", 
-           (void*)store, (void*)untrusted, untrusted ? sk_X509_num(untrusted) : 0);
     if (!store) {
         fprintf(stderr, "No store provided\n");
     } else {
@@ -722,7 +716,6 @@ int verify_dcd_signature(X509 *cert, X509_STORE *store, STACK_OF(X509) *untruste
                         }
                         X509_STORE_CTX_free(root_ctx);
                     } else {
-                        fprintf(stderr, "[Chameleon] Failed to create root verification context\n");
                         ok = 0;
                     }
                 } else {

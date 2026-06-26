@@ -34,7 +34,6 @@ static void *v2i_altAlg(const X509V3_EXT_METHOD *method,
                         STACK_OF(CONF_VALUE) *values)
 {
     if (sk_CONF_VALUE_num(values) != 1) {
-        printf("[altSigAlg] error: only one algorithm OID must be specified.\n");
         return NULL;
     }
 
@@ -43,13 +42,11 @@ static void *v2i_altAlg(const X509V3_EXT_METHOD *method,
 
     ASN1_OBJECT *obj = OBJ_txt2obj(val->name, 0);
     if (!obj) {
-        printf("[altSigAlg] error: invalid OID value: %s\n", val->value);
         return NULL;
     }
 
     X509_ALGOR *alg = X509_ALGOR_new();
     if (!alg) {
-        printf("[altSigAlg] error: memory allocation failed for X509_ALGOR.\n");
         ASN1_OBJECT_free(obj);
         return NULL;
     }
@@ -133,26 +130,22 @@ static void *v2i_altSig(const X509V3_EXT_METHOD *method,
 
     CONF_VALUE *val = sk_CONF_VALUE_value(values, 0);
     if (strncmp("file", val->name, 4)) {
-        printf("Value for alt_sig_val must start with 'file:'\n");
         return NULL;
     }
 
     keybio = BIO_new_file(val->value, "rb");
     if (!keybio){ 
-        printf("Failed to make alternative private key file\n");
         return NULL;
     }
 
     pkey = PEM_read_bio_PrivateKey(keybio, NULL, NULL, NULL);
     BIO_free(keybio);
     if (!pkey){ 
-        printf("Failed to open alternative private key file\n");
         return NULL;
     }
 
 
     if((altsig = create_dummy_extension(pkey))==NULL) {
-        printf("create_dummy_extension error\n");
         return NULL;
     }
 
@@ -185,7 +178,6 @@ ASN1_BIT_STRING* create_dummy_extension(EVP_PKEY* key) {
 
     signatureLength = EVP_PKEY_size(key);
     if ((hs->data = OPENSSL_zalloc(signatureLength)) == NULL) {
-        printf("create_dummy_extension error\n");
         return NULL;
     }
     hs->length = signatureLength;
@@ -293,27 +285,21 @@ static int ALT_SIGNATURE_verify(X509* x, EVP_PKEY* public_key) {
 
     // get the alternative signature value extension
     if ((i = X509_get_ext_by_NID(x, NID_alt_signature_value, -1)) < 0) {
-        printf("[ALT_verify] no alt sig val extension\n");
         return 0;
     }
     if ((ext = X509_get_ext(x, i)) == NULL) {
-        printf("[ALT_verify] no alt sig val extension\n");
         return 0;
     }
     extoct = ASN1_OCTET_STRING_dup(X509_EXTENSION_get_data(ext));
     if ((altsig = X509V3_EXT_d2i(ext)) == NULL) {
-        printf("[ALT_verify] alt sig val parsing failure\n");
         return 0;
     }
-    printf("[ALT_verify] extract altsig\n");
     signature = ASN1_STRING_dup(altsig);
  // get the alternative signature algorithm extension
     if ((i = X509_get_ext_by_NID(x, NID_alt_signature_algorithm, -1)) < 0) {
-        printf("[ALT_verify] no alt sig alg extension\n");
         return 0;
     }
     if ((ext_alg = X509_get_ext(x, i)) == NULL) {
-        printf("[ALT_verify] no alt sig alg extension\n");
         return 0;
     }
     if ((altalg = X509V3_EXT_d2i(ext_alg)) == NULL) {
@@ -327,15 +313,12 @@ static int ALT_SIGNATURE_verify(X509* x, EVP_PKEY* public_key) {
         return 0;
     }
 
-    printf("[ALT_verify] generte dummy extension\n");
 
     ext_len = ASN1_item_i2d((void*)dummy, &ext_der, ASN1_ITEM_rptr(ASN1_BIT_STRING));
     if (ext_len < 0) {
-        printf("[ALT_verify] alt sig parsing failure\n");
         return 0;
     }
     if ((ext_oct = ASN1_OCTET_STRING_new()) == NULL) {
-        printf("[ALT_verify] alt sig malloc failure\n");
         return 0;
     }
     ext_oct->data = ext_der;
@@ -352,14 +335,12 @@ static int ALT_SIGNATURE_verify(X509* x, EVP_PKEY* public_key) {
     int tbslen;
 
     if (!md_ctx) {
-        printf("[ALT_verify] context creation failed\n");
         X509_EXTENSION_set_data(ext, extoct);
         return 0;
     }
 
     tbslen = ASN1_item_i2d((ASN1_VALUE *)&x->cert_info, &tbs, ASN1_ITEM_rptr(X509_CINF));
     if (tbslen <= 0) {
-        printf("[ALT_verify] TBS encoding failed\n");
         EVP_MD_CTX_free(md_ctx);
         X509_EXTENSION_set_data(ext, extoct);
         return 0;
@@ -368,7 +349,6 @@ static int ALT_SIGNATURE_verify(X509* x, EVP_PKEY* public_key) {
 
 
     if (EVP_DigestVerifyInit(md_ctx, NULL, NULL, NULL, public_key) <= 0) {
-        printf("[ALT_verify] DigestVerifyInit failed\n");
         ERR_print_errors_fp(stderr);
         EVP_MD_CTX_free(md_ctx);
         OPENSSL_free(tbs);
@@ -377,7 +357,6 @@ static int ALT_SIGNATURE_verify(X509* x, EVP_PKEY* public_key) {
     }
 
     if (EVP_DigestVerify(md_ctx, signature->data, signature->length, tbs, tbslen) <= 0) {
-        printf("[ALT_verify] alt sig verification failure\n");
         ERR_print_errors_fp(stderr);
         EVP_MD_CTX_free(md_ctx);
         OPENSSL_free(tbs);

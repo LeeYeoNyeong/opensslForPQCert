@@ -110,6 +110,5 @@ EVP_PKEY* X509_get_alt_pubkey(X509* x) {
     if ((ck = X509V3_EXT_d2i(ext)) == NULL) {
     	return NULL;
     }
-    printf("no null 133\n");
     return X509_PUBKEY_get0(ck);
 }
