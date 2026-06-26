@@ -7998,7 +7998,7 @@ int SSL_CTX_enable_dual_certs(SSL_CTX *ctx)
     }
 
     /* Enable dual certificate mode */
-    ctx->cert->dual_certs_enabled = 1;
+    ctx->cert->hybrid_cert_enabled = 1;
 
     /* Initialize PQC stores if not already done */
     if (ctx->cert->pq_verify_store == NULL) {
@@ -8038,7 +8038,7 @@ int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF
     }
 
     /* Verify that dual certificate mode is enabled */
-    if (!ctx->cert->dual_certs_enabled) {
+    if (!ctx->cert->hybrid_cert_enabled) {
         ERR_raise(ERR_LIB_SSL, SSL_R_DUAL_CERTS_NOT_ENABLED);
         return 0;
     }
@@ -8217,7 +8217,7 @@ int SSL_CTX_load_pq_verify_file(SSL_CTX *ctx, const char *CAfile)
     }
     
     /* Enable dual certificates if not already enabled */
-    if (!ctx->cert->dual_certs_enabled) {
+    if (!ctx->cert->hybrid_cert_enabled) {
         if (!SSL_CTX_enable_dual_certs(ctx)) {
             ERR_raise(ERR_LIB_SSL, SSL_R_CERTIFICATE_VERIFY_FAILED);
         return 0;

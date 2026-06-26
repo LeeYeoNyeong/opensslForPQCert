@@ -89,7 +89,7 @@ CERT *ssl_cert_new(size_t ssl_pkey_num)
     ret->pq_chain = NULL;
     ret->pq_verify_store = NULL;
     ret->pq_chain_store = NULL;
-    ret->dual_certs_enabled = 0;
+    ret->hybrid_cert_enabled = 0;
     
     if (!CRYPTO_NEW_REF(&ret->references, 1)) {
         OPENSSL_free(ret->pkeys);
@@ -228,7 +228,7 @@ CERT *ssl_cert_dup(CERT *cert)
     }
 #endif
 
-    ret->dual_certs_enabled = cert->dual_certs_enabled;
+    ret->hybrid_cert_enabled = cert->hybrid_cert_enabled;
     
     if (cert->pq_verify_store != NULL) {
         X509_STORE_up_ref(cert->pq_verify_store);
@@ -613,7 +613,7 @@ int ssl_cert_set_pq_certificate(CERT *c, X509 *cert, EVP_PKEY *key, STACK_OF(X50
         return 0;
     }
 
-    if (!c->dual_certs_enabled) {
+    if (!c->hybrid_cert_enabled) {
         ERR_raise(ERR_LIB_SSL, SSL_R_DUAL_CERTS_NOT_ENABLED);
         return 0;
     }
@@ -696,7 +696,7 @@ static int ssl_verify_internal(SSL_CONNECTION *s, STACK_OF(X509) *sk, EVP_PKEY *
     else
         verify_store = sctx->cert_store;
     
-    if (s->cert->dual_certs_enabled && s->cert->pq_verify_store != NULL && sk != NULL) {
+    if (s->cert->hybrid_cert_enabled && s->cert->pq_verify_store != NULL && sk != NULL) {
         X509 *first_cert = sk_X509_value(sk, 0);
         if (first_cert != NULL) {
             EVP_PKEY *pkey = X509_get0_pubkey(first_cert);
@@ -1491,7 +1491,7 @@ int ssl_build_cert_chain(SSL_CONNECTION *s, SSL_CTX *ctx, int flags)
         if (!X509_STORE_add_cert(chain_store, cpk->x509))
             goto err;
     } else {
-        if (c->dual_certs_enabled && c->pq_chain_store != NULL && cpk->x509 != NULL) {
+        if (c->hybrid_cert_enabled && c->pq_chain_store != NULL && cpk->x509 != NULL) {
             EVP_PKEY *pkey = X509_get0_pubkey(cpk->x509);
             if (pkey != NULL) {
                 int nid = EVP_PKEY_id(pkey);

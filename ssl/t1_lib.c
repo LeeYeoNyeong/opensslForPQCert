@@ -4116,7 +4116,7 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
     }
 
     /* Select PQC signature algorithm if dual certificates are enabled */
-    if (s->cert->dual_certs_enabled && s->cert->pqkey != NULL) {
+    if (s->cert->hybrid_cert_enabled && s->cert->pqkey != NULL) {
         
         /* Use enhanced PQC signature algorithm selection */
         const SIGALG_LOOKUP *selected_pq_lu = tls1_select_enhanced_pq_sigalg(s, 
@@ -4806,7 +4806,7 @@ int tls1_select_dual_algorithms(SSL_CONNECTION *s,
     }
     
     /* Select PQ signature algorithm */
-    if (pq_pkey != NULL && s->cert->dual_certs_enabled) {
+    if (pq_pkey != NULL && s->cert->hybrid_cert_enabled) {
         selected_pq = tls1_select_enhanced_pq_sigalg(s, pq_pkey, 
                                                      s->s3.tmp.peer_dual_pq_sigalgs,
                                                      s->s3.tmp.peer_dual_pq_sigalgslen);
