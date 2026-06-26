@@ -274,6 +274,18 @@
 # define SSL_IS_FIRST_HANDSHAKE(s) ((s)->s3.tmp.finish_md_len == 0 \
                                     || (s)->s3.tmp.peer_finish_md_len == 0)
 
+/*
+ * Hybrid-certificate authentication is negotiated only when this endpoint is
+ * configured for hybrid certificates (cert->hybrid_cert_enabled) AND the peer
+ * sent the hybrid_cert capability flag (s3.tmp.hybrid_cert; on the server set
+ * from the ClientHello, on the client from the EncryptedExtensions echo). This
+ * is the server send-side activation gate; the client receive-side strict
+ * enforcement that completes downgrade protection is added separately.
+ */
+# define SSL_CONNECTION_HYBRID_NEGOTIATED(s) \
+    ((s)->cert != NULL && (s)->cert->hybrid_cert_enabled != 0 \
+     && (s)->s3.tmp.hybrid_cert != 0)
+
 /* See if we need explicit IV */
 # define SSL_USE_EXPLICIT_IV(s)  \
     (SSL_CONNECTION_GET_SSL(s)->method->ssl3_enc->enc_flags & SSL_ENC_FLAG_EXPLICIT_IV)

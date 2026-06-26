@@ -543,8 +543,8 @@ static WRITE_TRAN ossl_statem_server13_write_transition(SSL_CONNECTION *s)
     case TLS_ST_SW_COMP_CERT:
     case TLS_ST_SW_CERT:
         /* Check certificate type before transitioning */
-        if (s->cert->hybrid_cert_enabled) {
-            /* Dual mode: send classic CertificateVerify first, then PQ */
+        if (SSL_CONNECTION_HYBRID_NEGOTIATED(s)) {
+            /* Hybrid negotiated: send classic CertificateVerify first, then PQ */
             st->hand_state = TLS_ST_SW_CERT_VRFY;
             return WRITE_TRAN_CONTINUE;
         } else if (is_pqc_only_certificate(s)) {
@@ -560,8 +560,8 @@ static WRITE_TRAN ossl_statem_server13_write_transition(SSL_CONNECTION *s)
     case TLS_ST_SW_CERT_VRFY:
         /* This state is only reached for dual mode or classic certificates */
         /* After sending classic CertificateVerify, check if we need to send PQ */
-        if (s->cert->hybrid_cert_enabled) {
-            /* Dual mode: transition to send PQ CertificateVerify */
+        if (SSL_CONNECTION_HYBRID_NEGOTIATED(s)) {
+            /* Hybrid negotiated: transition to send PQ CertificateVerify */
             st->hand_state = TLS_ST_SW_PQ_CERT_VRFY;
             return WRITE_TRAN_CONTINUE;
         } else {
@@ -3880,8 +3880,8 @@ CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt
         }
         break;
     case TLSEXT_cert_type_x509:
-        /* Check if dual certificate mode is enabled */
-        if (s->cert->hybrid_cert_enabled && s->cert->pqkey != NULL) {
+        /* Send the hybrid (classic + PQ) chain only when hybrid is negotiated */
+        if (SSL_CONNECTION_HYBRID_NEGOTIATED(s) && s->cert->pqkey != NULL) {
             /* Format according to IETF draft (dual certificate specification):
              * Certificate chain format:
              * - Length of classic certificate chain (3 bytes)

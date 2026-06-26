@@ -466,8 +466,8 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     }
 
     /* Get PQC private key - support both dual mode and PQC-only/composite */
-    if (s->cert->hybrid_cert_enabled && s->cert->pqkey != NULL && s->cert->pqkey->privatekey != NULL) {
-        /* Dual mode: use pqkey */
+    if (SSL_CONNECTION_HYBRID_NEGOTIATED(s) && s->cert->pqkey != NULL && s->cert->pqkey->privatekey != NULL) {
+        /* Hybrid (dual) negotiated: use the dedicated PQ key */
         pq_pkey = s->cert->pqkey->privatekey;
     } else if (s->cert->key != NULL && s->cert->key->privatekey != NULL) {
         /* PQC-only or composite: use main key */
