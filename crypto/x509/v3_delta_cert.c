@@ -111,10 +111,13 @@ static int compare_public_keys(X509 *delta, X509 *base) {
 }
 
 /*
- * Copy extensions from delta cert that are NOT present or different in base
- * cert. Draft-07 4.1: "The extensions field MUST contain the extensions present
- * in the Delta Certificate that are not present in the Base Certificate." It
- * also implies extensions with different values should be included.
+ * Build the DCD "extensions" field from the Delta Certificate, following
+ * draft-bonnell-lamps-chameleon-certs-07 §"DCD content".  The field MUST NOT
+ * contain an extension that (a) has the same criticality and DER-encoded value
+ * as in the Base Certificate, (b) has a type that does not appear in the Base
+ * Certificate, or (c) is the DCD extension itself.  Only extensions of a type
+ * that exists in the base, but whose criticality and/or value differ, are
+ * included; iteration is in Delta Certificate order so the field mirrors it.
  */
 static STACK_OF(X509_EXTENSION) *
     copy_different_extensions_from_stack(X509 *delta,
@@ -138,15 +141,17 @@ static STACK_OF(X509_EXTENSION) *
 
         int include = 0;
 
-        if (base_exts == NULL) {
-            include = 1;
-        } else {
-            /* Check if this extension exists in base stack */
+        if (base_exts != NULL) {
+            /* Check if this extension type exists in the base stack */
             int base_idx = X509v3_get_ext_by_OBJ(base_exts, obj, -1);
 
             if (base_idx < 0) {
-                /* Not in base, include it */
-                include = 1;
+                /*
+                 * Type absent from the base: the draft forbids encoding it in
+                 * the DCD (the reconstructor cannot overlay a non-existent
+                 * extension and is required to fail on one).  Skip it.
+                 */
+                include = 0;
             } else {
                 /* Exists in base, compare values */
                 X509_EXTENSION *b_ext = sk_X509_EXTENSION_value(base_exts, base_idx);
@@ -605,20 +610,51 @@ X509 *reconstruct_delta(X509 *base, DeltaCertificateDescriptor *dcd) {
         }
     }
 
-    while (X509_get_ext_count(delta) > 0) {
-        X509_delete_ext(delta, 0);
-    }
-
+    /*
+     * Extensions: draft-bonnell-lamps-chameleon-certs-07 §"Reconstructing a
+     * Delta Certificate" step 8.  The base extensions are already present (via
+     * X509_dup of base, with the DCD extension removed above); the DCD's
+     * "extensions" field carries only those whose criticality/value differ from
+     * the base.  For each DCD extension, replace the matching extension (by OID)
+     * in the template, preserving its position and every unchanged base
+     * extension.  An extension whose type is absent from the template MUST cause
+     * reconstruction to fail.
+     */
     if (dcd->extensions) {
         for (int i = 0; i < sk_X509_EXTENSION_num(dcd->extensions); ++i) {
-            X509_EXTENSION *dup =
-                X509_EXTENSION_dup(sk_X509_EXTENSION_value(dcd->extensions, i));
-            if (!dup || !X509_add_ext(delta, dup, -1)) {
+            X509_EXTENSION *src = sk_X509_EXTENSION_value(dcd->extensions, i);
+            int loc = X509_get_ext_by_OBJ(delta, X509_EXTENSION_get_object(src),
+                                          -1);
+            if (loc < 0) {
+                X509_free(delta);
+                return NULL;
+            }
+            X509_EXTENSION *dup = X509_EXTENSION_dup(src);
+            if (!dup) {
+                X509_free(delta);
+                return NULL;
+            }
+            X509_EXTENSION_free(X509_delete_ext(delta, loc));
+            if (!X509_add_ext(delta, dup, loc)) {
                 X509_EXTENSION_free(dup);
+                X509_free(delta);
                 return NULL;
             }
             X509_EXTENSION_free(dup);
         }
+    }
+
+    /*
+     * Signature algorithm: draft-bonnell-lamps-chameleon-certs-07 step 3.  When
+     * the DCD carries a signature field it replaces BOTH the inner "signature"
+     * of the TBSCertificate and the outer "signatureAlgorithm"; otherwise the
+     * base algorithm is retained.
+     */
+    if (dcd->signature != NULL
+        && (!X509_ALGOR_copy(&delta->cert_info.signature, dcd->signature)
+            || !X509_ALGOR_copy(&delta->sig_alg, dcd->signature))) {
+        X509_free(delta);
+        return NULL;
     }
 
     if (dcd->signatureValue &&
@@ -776,7 +812,6 @@ ASN1_OCTET_STRING *create_delta_certificate_descriptor(X509 *base_cert,
     ASN1_OCTET_STRING *ext_val = NULL;
     unsigned char *der = NULL;
     int der_len = 0;
-    const X509_ALGOR *sig_alg;
     const ASN1_BIT_STRING *sig_val;
     
     if (!base_cert || !delta_cert) {
@@ -828,30 +863,60 @@ ASN1_OCTET_STRING *create_delta_certificate_descriptor(X509 *base_cert,
         if (!dcd->SubjectPublicKeyInfo) goto err;
     }
     
-    /* Extensions: copy all from Delta (Draft implies DCD contains extensions that differ, 
-       but for simplicity/correctness we should copy extensions present in Delta but not Base?
-       Draft 4.2: "The CA MUST encode extensions in the Base Certificate in the same order used for the Delta Certificate"
-       Draft 4.2: "...populates the DCD extension with the values of the fields which differ..."
-       We will copy extensions from Delta Certificate to DCD. Simpler and safer for PQC extensions.
-    */
-    /* TODO: Only copy differing extensions. For now, copy all extensions from Delta Cert. */
-     {
-        const STACK_OF(X509_EXTENSION) *delta_exts = X509_get0_extensions(delta_cert);
-        if (delta_exts && sk_X509_EXTENSION_num(delta_exts) > 0) {
-            dcd->extensions = sk_X509_EXTENSION_deep_copy(delta_exts, 
-                                                           X509_EXTENSION_dup, 
-                                                           X509_EXTENSION_free);
-             if (!dcd->extensions) goto err;
+    /*
+     * The DCD "extensions" overlay can only represent base/delta pairs that
+     * share the same set of non-DCD extension types: reconstruction starts from
+     * the base extensions and overlays same-type DCD extensions, never adding or
+     * removing a type (draft-bonnell-lamps-chameleon-certs-07).  If the OID sets
+     * differ in either direction the pair is not representable as a DCD, so fail
+     * rather than emit a descriptor that cannot reconstruct/verify.
+     */
+    {
+        const STACK_OF(X509_EXTENSION) *d_exts = X509_get0_extensions(delta_cert);
+        const STACK_OF(X509_EXTENSION) *b_exts = X509_get0_extensions(base_cert);
+        int k;
+
+        for (k = 0; k < sk_X509_EXTENSION_num(d_exts); k++) {
+            ASN1_OBJECT *o =
+                X509_EXTENSION_get_object(sk_X509_EXTENSION_value(d_exts, k));
+            if (OBJ_obj2nid(o) == NID_id_ce_deltaCertificateDescriptor)
+                continue;
+            if (X509v3_get_ext_by_OBJ(b_exts, o, -1) < 0)
+                goto err;                       /* delta-only extension type */
         }
-     }
+        for (k = 0; k < sk_X509_EXTENSION_num(b_exts); k++) {
+            ASN1_OBJECT *o =
+                X509_EXTENSION_get_object(sk_X509_EXTENSION_value(b_exts, k));
+            if (OBJ_obj2nid(o) == NID_id_ce_deltaCertificateDescriptor)
+                continue;
+            if (X509v3_get_ext_by_OBJ(d_exts, o, -1) < 0)
+                goto err;                       /* base-only extension type */
+        }
+    }
+
+    /*
+     * Extensions: draft-bonnell-lamps-chameleon-certs-07 §"DCD content".
+     * Encode only the extensions whose criticality/value differ from the base
+     * and whose type also exists in the base; identical, base-absent-type, and
+     * DCD extensions are omitted.  A NULL result means nothing differs, i.e. the
+     * extensions field is (legitimately) absent -- not an error.
+     */
+    dcd->extensions = copy_different_extensions(delta_cert, base_cert);
 
     /* 2. Copy Signature from Delta Certificate */
     /* Get signature algorithm and value from Delta Certificate */
-    X509_get0_signature(&sig_val, &sig_alg, delta_cert);
+    X509_get0_signature(&sig_val, NULL, delta_cert);
 
-    /* Copy AlgorithmIdentifier */
-    dcd->signature = X509_ALGOR_dup(sig_alg);
-    if (!dcd->signature) goto err;
+    /*
+     * Signature algorithm (§"DCD content"): include only if the Delta
+     * Certificate's signature field differs from the base's; otherwise it MUST
+     * be absent and the reconstructor retains the base algorithm.
+     */
+    if (X509_ALGOR_cmp(X509_get0_tbs_sigalg(delta_cert),
+                       X509_get0_tbs_sigalg(base_cert)) != 0) {
+        dcd->signature = X509_ALGOR_dup(X509_get0_tbs_sigalg(delta_cert));
+        if (!dcd->signature) goto err;
+    }
 
     /* Copy Signature Value (BIT STRING) */
     /* Note: dcd->signatureValue is a BIT STRING */
