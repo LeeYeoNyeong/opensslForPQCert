@@ -216,6 +216,8 @@ const char *X509_verify_cert_error_string(long n)
         return "Raw public key untrusted, no trusted keys configured";
     case X509_V_ERR_RELATED_CERT_VERIFICATION_FAILED:
         return "Related certificate extension verification failed";
+    case X509_V_ERR_ALT_SIG_VERIFY_FAIL:
+        return "Alternative signature (Catalyst) verification failed";
 
         /*
          * Entries must be kept consistent with include/openssl/x509_vfy.h.in
