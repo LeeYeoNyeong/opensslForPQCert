@@ -728,8 +728,27 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
      * server certificate from the client_cert_cb callback.
      */
     
-    /* For dual certificates, save the handshake hash after processing classic cert verify */
-    if (SSL_CONNECTION_IS_TLS13(s) && s->session && s->session->dual_certs_enabled) {
+    /*
+     * Hybrid certificates chain the PQCertificateVerify over the classical
+     * CertificateVerify (draft design): after the classical CV has been added
+     * to the transcript we re-snapshot the running handshake hash so the
+     * following PQCertificateVerify is signed/verified over a transcript that
+     * *includes* the classical CV. This must happen for BOTH hybrid families:
+     *   - multi-certificate (Dual/Related): s->session->dual_certs_enabled, and
+     *   - single-certificate (Chameleon/Catalyst): hybrid_cert negotiated, i.e.
+     *     this endpoint is hybrid-configured AND the peer advertised/echoed the
+     *     hybrid_cert capability flag (s3.tmp.hybrid_cert).
+     * The peer's send side always uses the live handshake hash (the classical
+     * CV is already accumulated by the time it builds the PQCertificateVerify),
+     * so it is unconditionally chained; this read-side re-snapshot is what
+     * brings the verifier's TBS into parity for the single-certificate case.
+     * PQC-only/composite handshakes carry no classical CertificateVerify and
+     * therefore never reach this function, so they are excluded automatically.
+     */
+    if (SSL_CONNECTION_IS_TLS13(s) && s->session
+            && (s->session->dual_certs_enabled
+                || (s->cert != NULL && s->cert->hybrid_cert_enabled
+                    && s->s3.tmp.hybrid_cert))) {
 
         if (!ssl_handshake_hash(s, s->cert_verify_hash,
                                 sizeof(s->cert_verify_hash),
