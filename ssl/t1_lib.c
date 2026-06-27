@@ -4139,16 +4139,40 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
      * back to standard TLS 1.3 (no PQCertificateVerify).
      */
     s->s3.tmp.pq_sigalg = NULL;
-    if (s->cert->hybrid_cert_enabled && s->s3.tmp.hybrid_cert
-            && s->cert->pqkey != NULL && s->cert->pqkey->privatekey != NULL) {
-        const SIGALG_LOOKUP *key_pq_lu = NULL;
+    if (s->cert->hybrid_cert_enabled && s->s3.tmp.hybrid_cert) {
+        EVP_PKEY *pq_priv = NULL;
 
-        if (tls1_select_pq_sigalg(s, s->cert->pqkey->privatekey, &key_pq_lu)
-                && key_pq_lu != NULL
-                && tls1_in_list(key_pq_lu->sigalg, s->s3.tmp.peer_sigalgs,
-                                s->s3.tmp.peer_sigalgslen)) {
-            pq_lu = key_pq_lu;
-            s->s3.tmp.pq_sigalg = pq_lu;
+        if (s->cert->pqkey != NULL && s->cert->pqkey->privatekey != NULL) {
+            /* Dual (multi-certificate): the PQ key lives in the second cert. */
+            pq_priv = s->cert->pqkey->privatekey;
+        } else if (s->cert->alt_privatekey != NULL
+                   && s->s3.tmp.cert != NULL
+                   && ssl_cert_catalyst_altkey_matches(s->s3.tmp.cert->x509,
+                                                       s->cert->alt_privatekey)) {
+            /*
+             * Catalyst (single-certificate): the PQ key matches the selected
+             * certificate's subjectAltPublicKeyInfo extension. A context may
+             * hold several certificates (e.g. SNI, or RSA + ECDSA) while only
+             * one carries the loaded alt key, so we confirm the alt private key
+             * actually corresponds to THIS certificate's alt public key before
+             * negotiating hybrid -- otherwise the server would sign with a key
+             * the peer cannot verify against the selected cert. Deriving the PQ
+             * sigalg here from the same key tls_construct_pq_cert_verify signs
+             * with keeps negotiation and signing in lockstep.
+             */
+            pq_priv = s->cert->alt_privatekey;
+        }
+
+        if (pq_priv != NULL) {
+            const SIGALG_LOOKUP *key_pq_lu = NULL;
+
+            if (tls1_select_pq_sigalg(s, pq_priv, &key_pq_lu)
+                    && key_pq_lu != NULL
+                    && tls1_in_list(key_pq_lu->sigalg, s->s3.tmp.peer_sigalgs,
+                                    s->s3.tmp.peer_sigalgslen)) {
+                pq_lu = key_pq_lu;
+                s->s3.tmp.pq_sigalg = pq_lu;
+            }
         }
     }
 

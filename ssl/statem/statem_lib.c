@@ -467,10 +467,26 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         goto end;
     }
 
-    /* Get PQC private key - support both dual mode and PQC-only/composite */
+    /* Get PQC private key - support dual mode, Catalyst, and PQC-only/composite */
     if (SSL_CONNECTION_HYBRID_NEGOTIATED(s) && s->cert->pqkey != NULL && s->cert->pqkey->privatekey != NULL) {
         /* Hybrid (dual) negotiated: use the dedicated PQ key */
         pq_pkey = s->cert->pqkey->privatekey;
+    } else if (SSL_CONNECTION_HYBRID_NEGOTIATED(s)
+               && s->cert->alt_privatekey != NULL
+               && s->s3.tmp.cert != NULL
+               && ssl_cert_catalyst_altkey_matches(s->s3.tmp.cert->x509,
+                                                   s->cert->alt_privatekey)) {
+        /*
+         * Catalyst single-certificate hybrid: the PQC public key lives in the
+         * selected certificate's subjectAltPublicKeyInfo extension; sign the
+         * PQCertificateVerify with the matching alternative private key. The
+         * peer recovers the verifying key via X509_get_alt_pubkey() on the same
+         * extension. We re-confirm here that the loaded alt private key matches
+         * THIS certificate's alt public key (a context may hold several certs
+         * while only one carries the alt key), so the signature is always
+         * verifiable by the peer.
+         */
+        pq_pkey = s->cert->alt_privatekey;
     } else if (s->cert->key != NULL && s->cert->key->privatekey != NULL) {
         /* PQC-only or composite: use main key */
         pq_pkey = s->cert->key->privatekey;
