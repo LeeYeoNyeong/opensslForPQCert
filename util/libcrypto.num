@@ -5557,3 +5557,4 @@ i2d_RELATED_CERTIFICATE                 5683    3_3_0   EXIST::FUNCTION:
 X509_get_alt_pubkey                     5684    3_3_0   EXIST::FUNCTION:
 ALT_SIGNATURE_sign                      5685    3_3_0   EXIST::FUNCTION:
 X509v3_alt_sig_validate_path            5686    3_3_0   EXIST::FUNCTION:
+reconstruct_delta                       5687    3_3_0   EXIST::FUNCTION:

@@ -23,6 +23,9 @@ typedef struct DeltaCertificateDescriptor_st {
 
 int verify_dcd_signature(X509 *cert, X509_STORE *store, STACK_OF(X509) *untrusted);
 
+/* Reconstruct the Delta certificate from a Base certificate and its DCD. */
+X509 *reconstruct_delta(X509 *base, DeltaCertificateDescriptor *dcd);
+
 /* Create and sign DCD */
 ASN1_OCTET_STRING *create_delta_certificate_descriptor(X509 *base_cert,
                                                        X509 *delta_cert);

@@ -19,9 +19,11 @@
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include <openssl/trace.h>
 #include <openssl/encoder.h>
 #include <openssl/v3_certbind.h>
+#include <openssl/v3_dcd.h>
 
 /*
  * Map error codes to TLS/SSL alart types.
@@ -807,15 +809,53 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         }
     }
     
-    /* If not dual mode or no PQC chain, try to get PQC key from main certificate */
+    /*
+     * Single-certificate hybrids and the pure-PQC/composite case all carry the
+     * PQC public key in the (single) peer certificate, but in different places:
+     *   - Catalyst:  subjectAltPublicKeyInfo extension (alternative key);
+     *   - Chameleon: the reconstructed Delta certificate's SubjectPublicKeyInfo;
+     *   - PQC-only / composite: the peer's main key itself.
+     * The certificate-level trust of these keys is established separately
+     * (Catalyst: X509v3_alt_sig_validate_path during chain verification;
+     *  Chameleon: ssl_verify_chameleon_dcd full path validation of the
+     *  reconstructed Delta, run from the certificate post-processing on both
+     *  peer-authentication directions); here we only resolve the key used to
+     *  verify the PQCertificateVerify PoP.
+     * pq_pkey must own a reference because it is released with EVP_PKEY_free()
+     * at the end of this function.
+     */
     if (pq_pkey == NULL && s->session != NULL && s->session->peer != NULL) {
-        EVP_PKEY *peer_pkey = X509_get0_pubkey(s->session->peer);
-        if (peer_pkey != NULL) {
-            const char *key_type_name = EVP_PKEY_get0_type_name(peer_pkey);
-            /* Check if this is a PQC certificate (pure or composite) */
-            if (key_type_name != NULL && is_pqc_only_certificate(s)) {
-                pq_pkey = X509_get_pubkey(s->session->peer);
+        X509 *peer = s->session->peer;
+
+        if (X509_get_ext_by_NID(peer, NID_subject_alt_public_key_info, -1) >= 0) {
+            /*
+             * Catalyst. X509_get_alt_pubkey() returns a borrowed pointer (it
+             * does not raise the reference count), so take our own reference.
+             */
+            EVP_PKEY *alt = X509_get_alt_pubkey(peer);
+            if (alt != NULL && EVP_PKEY_up_ref(alt))
+                pq_pkey = alt;
+        } else if (X509_get_ext_by_NID(peer,
+                       NID_id_ce_deltaCertificateDescriptor, -1) >= 0) {
+            /*
+             * Chameleon. The classical CertificateVerify was already verified
+             * against the Base certificate's main key, so the PQC key here is
+             * necessarily the reconstructed Delta certificate's key.
+             */
+            DeltaCertificateDescriptor *dcd =
+                X509_get_ext_d2i(peer, NID_id_ce_deltaCertificateDescriptor,
+                                 NULL, NULL);
+            if (dcd != NULL) {
+                X509 *delta = reconstruct_delta(peer, dcd);
+                if (delta != NULL) {
+                    pq_pkey = X509_get_pubkey(delta);   /* +1 ref */
+                    X509_free(delta);
+                }
+                DeltaCertificateDescriptor_free(dcd);
             }
+        } else if (is_pqc_only_certificate(s)) {
+            /* Pure PQC or composite: the peer's main key is the PQC key. */
+            pq_pkey = X509_get_pubkey(peer);
         }
     }
     
