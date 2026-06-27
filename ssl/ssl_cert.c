@@ -703,9 +703,26 @@ static int ssl_verify_internal(SSL_CONNECTION *s, STACK_OF(X509) *sk, EVP_PKEY *
         if (first_cert != NULL) {
             EVP_PKEY *pkey = X509_get0_pubkey(first_cert);
             if (pkey != NULL) {
-                int nid = EVP_PKEY_id(pkey);
-                if (nid >= 1000) {
+                /*
+                 * Verify a post-quantum chain against the PQC trust store.
+                 * EVP_PKEY_get_id() is unreliable for provider-only keys
+                 * (e.g. oqsprovider ML-DSA returns -1), so classify by
+                 * exclusion: any leaf that is not a classical TLS signature
+                 * key is treated as post-quantum. The same routine verifies
+                 * the classical chain too, where the leaf is a classical key
+                 * and the classical store is (correctly) kept.
+                 */
+                switch (EVP_PKEY_get_id(pkey)) {
+                case EVP_PKEY_RSA:
+                case EVP_PKEY_RSA_PSS:
+                case EVP_PKEY_EC:
+                case EVP_PKEY_ED25519:
+                case EVP_PKEY_ED448:
+                case EVP_PKEY_DSA:
+                    break;      /* classical leaf: keep the classical store */
+                default:
                     verify_store = s->cert->pq_verify_store;
+                    break;
                 }
             }
         }
