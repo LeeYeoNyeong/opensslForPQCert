@@ -310,9 +310,33 @@ EXT_RETURN tls_construct_ctos_sig_algs(SSL_CONNECTION *s, WPACKET *pkt,
             || !WPACKET_start_sub_packet_u16(pkt)
                /* Sub-packet for the actual list */
             || !WPACKET_start_sub_packet_u16(pkt)
-            || !tls12_copy_sigalgs(s, pkt, salg, salglen)
-            || !WPACKET_close(pkt)
-            || !WPACKET_close(pkt)) {
+            || !tls12_copy_sigalgs(s, pkt, salg, salglen)) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        return EXT_RETURN_FAIL;
+    }
+
+    /*
+     * When configured for hybrid certificates, also advertise our PQ signature
+     * algorithms in this standard signature_algorithms list. As of Phase 4b the
+     * server selects the hybrid certificate's PQ algorithm from this single
+     * list, so the PQ schemes must appear here and not only in the (legacy)
+     * dual_signature_algorithms extension. Gated on hybrid_cert_enabled, so a
+     * non-hybrid ClientHello is byte-for-byte unchanged. tls12_get_pq_sigalgs
+     * returns the advertisable (non-composite) PQ schemes.
+     */
+    if (s->cert != NULL && s->cert->hybrid_cert_enabled) {
+        const uint16_t *pqsalg = NULL;
+        size_t pqsalglen = tls12_get_pq_sigalgs(s, 1, &pqsalg);
+
+        /* Same lookup/security-policy filtering as the classical copy above. */
+        if (!tls12_copy_pq_sigalgs(s, pkt, pqsalg, pqsalglen)) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+            return EXT_RETURN_FAIL;
+        }
+    }
+
+    if (!WPACKET_close(pkt)         /* actual list */
+            || !WPACKET_close(pkt)) {   /* sig-algs extension */
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return EXT_RETURN_FAIL;
     }

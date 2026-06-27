@@ -1986,8 +1986,13 @@ static int final_dual_sig_algs(SSL_CONNECTION *s, unsigned int context, int sent
 
 static int init_hybrid_cert(SSL_CONNECTION *s, unsigned int context)
 {
-    /* Reset the per-handshake "peer advertised hybrid_cert" flag. */
+    /*
+     * Reset the per-handshake "peer advertised hybrid_cert" flag and the
+     * negotiated PQ signature algorithm. pq_sigalg is the pair-confirmation
+     * signal read by SSL_CONNECTION_HYBRID_NEGOTIATED(), so it must start NULL.
+     */
     s->s3.tmp.hybrid_cert = 0;
+    s->s3.tmp.pq_sigalg = NULL;
     return 1;
 }
 

@@ -275,16 +275,26 @@
                                     || (s)->s3.tmp.peer_finish_md_len == 0)
 
 /*
- * Hybrid-certificate authentication is negotiated only when this endpoint is
- * configured for hybrid certificates (cert->hybrid_cert_enabled) AND the peer
- * sent the hybrid_cert capability flag (s3.tmp.hybrid_cert; on the server set
- * from the ClientHello, on the client from the EncryptedExtensions echo). This
- * is the server send-side activation gate; the client receive-side strict
- * enforcement that completes downgrade protection is added separately.
+ * Hybrid-certificate authentication is negotiated only when ALL of:
+ *   - this endpoint is configured for hybrid certificates
+ *     (cert->hybrid_cert_enabled),
+ *   - the peer sent the hybrid_cert capability flag (s3.tmp.hybrid_cert; on the
+ *     server from the ClientHello, on the client from the EncryptedExtensions
+ *     echo), and
+ *   - the (classical, PQC) pair is satisfied: tls_choose_sigalg confirmed a PQC
+ *     signature algorithm that both matches the server's PQ key and was offered
+ *     by the peer, recording it in s3.tmp.pq_sigalg.
+ * tls_choose_sigalg runs (server: in tls_post_process_client_hello) before any
+ * consumer of this macro, including the EncryptedExtensions echo, so a NULL
+ * pq_sigalg here means the pair failed and the connection falls back to
+ * standard TLS 1.3. This is the server send-side activation gate; the client
+ * receive-side strict enforcement that completes downgrade protection is added
+ * separately.
  */
 # define SSL_CONNECTION_HYBRID_NEGOTIATED(s) \
     ((s)->cert != NULL && (s)->cert->hybrid_cert_enabled != 0 \
-     && (s)->s3.tmp.hybrid_cert != 0)
+     && (s)->s3.tmp.hybrid_cert != 0 \
+     && (s)->s3.tmp.pq_sigalg != NULL)
 
 /* See if we need explicit IV */
 # define SSL_USE_EXPLICIT_IV(s)  \
@@ -3025,6 +3035,8 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs);
 __owur long ssl_get_algorithm2(SSL_CONNECTION *s);
 __owur int tls12_copy_sigalgs(SSL_CONNECTION *s, WPACKET *pkt,
                               const uint16_t *psig, size_t psiglen);
+__owur int tls12_copy_pq_sigalgs(SSL_CONNECTION *s, WPACKET *pkt,
+                                 const uint16_t *psig, size_t psiglen);
 __owur int tls1_save_u16(PACKET *pkt, uint16_t **pdest, size_t *pdestlen);
 __owur int tls1_save_sigalgs(SSL_CONNECTION *s, PACKET *pkt, int cert);
 __owur int tls1_process_sigalgs(SSL_CONNECTION *s);

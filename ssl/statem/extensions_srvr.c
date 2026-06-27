@@ -1301,12 +1301,18 @@ EXT_RETURN tls_construct_stoc_hybrid_cert(SSL_CONNECTION *s, WPACKET *pkt,
 {
 #ifndef OPENSSL_NO_TLS1_3
     /*
-     * Echo the capability flag only when hybrid authentication is negotiated:
-     * the client advertised it (s3.tmp.hybrid_cert) and this server is
-     * configured with a hybrid certificate. Sent in EncryptedExtensions
-     * because TLS 1.3 does not permit this extension in ServerHello.
+     * Echo the capability flag only when hybrid authentication is fully
+     * negotiated: the client advertised it, this server is configured with a
+     * hybrid certificate, AND the (classical, PQC) pair was satisfied during
+     * tls_choose_sigalg (which ran in tls_post_process_client_hello, before
+     * this EncryptedExtensions extension). If the pair did not hold,
+     * SSL_CONNECTION_HYBRID_NEGOTIATED() is false, the echo is suppressed, and
+     * the handshake falls back to standard TLS 1.3 - keeping the invariant
+     * "echo sent iff PQCertificateVerify will be sent and is verifiable".
+     * Sent in EncryptedExtensions because TLS 1.3 does not permit this
+     * extension in ServerHello.
      */
-    if (!s->s3.tmp.hybrid_cert || !s->cert->hybrid_cert_enabled)
+    if (!SSL_CONNECTION_HYBRID_NEGOTIATED(s))
         return EXT_RETURN_NOT_SENT;
 
     if (!WPACKET_put_bytes_u16(pkt, TLSEXT_TYPE_hybrid_cert)

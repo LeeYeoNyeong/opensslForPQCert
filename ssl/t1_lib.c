@@ -2839,6 +2839,31 @@ int tls12_copy_sigalgs(SSL_CONNECTION *s, WPACKET *pkt,
     return rv;
 }
 
+/*
+ * Copy post-quantum signature algorithms into pkt, applying the same lookup
+ * and security-policy filtering as tls12_copy_sigalgs (via tls1_lookup_pq_sigalg
+ * and tls12_sigalg_allowed). Used to advertise PQ schemes inside the standard
+ * signature_algorithms list for hybrid certificates. Unlike tls12_copy_sigalgs
+ * this never requires at least one entry: emitting no PQ scheme simply means no
+ * hybrid PQ algorithm is offered (the connection then stays classical).
+ */
+int tls12_copy_pq_sigalgs(SSL_CONNECTION *s, WPACKET *pkt,
+                          const uint16_t *psig, size_t psiglen)
+{
+    size_t i;
+
+    for (i = 0; i < psiglen; i++, psig++) {
+        const SIGALG_LOOKUP *lu = tls1_lookup_pq_sigalg(s, *psig);
+
+        if (lu == NULL
+                || !tls12_sigalg_allowed(s, SSL_SECOP_SIGALG_SUPPORTED, lu))
+            continue;
+        if (!WPACKET_put_bytes_u16(pkt, *psig))
+            return 0;
+    }
+    return 1;
+}
+
 /* Given preference and allowed sigalgs set shared sigalgs */
 static size_t tls12_shared_sigalgs(SSL_CONNECTION *s,
                                    const SIGALG_LOOKUP **shsig,
@@ -4100,36 +4125,37 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
     s->cert->key = s->s3.tmp.cert;
     s->s3.tmp.sigalg = lu;
 
-    /* Select classic signature algorithm first */
-    
-    /* Use enhanced classic signature algorithm selection */
-    const SIGALG_LOOKUP *selected_classic_lu = tls1_select_enhanced_classic_sigalg(s, 
-                                                                                    s->s3.tmp.cert->privatekey,
-                                                                                    s->s3.tmp.peer_dual_sigalgs,
-                                                                                    s->s3.tmp.peer_dual_sigalgslen);
-    
-    if (selected_classic_lu != NULL) {
-        lu = selected_classic_lu;
-        s->s3.tmp.sigalg = lu;
-    } else {
-        /* Keep the original lu */
-    }
+    /*
+     * Classical signature algorithm: the standard selection above already set
+     * s3.tmp.sigalg = lu to match both the certificate key and the peer's
+     * signature_algorithms. The former hybrid override re-picked a classical
+     * sigalg without consulting the certificate key, which could return an
+     * algorithm incompatible with the key (a false-positive pair match). It is
+     * removed; the standard, key-aware choice stands for the classical half.
+     */
 
-    /* Select PQC signature algorithm only when hybrid is negotiated */
-    if (SSL_CONNECTION_HYBRID_NEGOTIATED(s) && s->cert->pqkey != NULL) {
+    /*
+     * Hybrid (dual) certificate: the (classical, PQC) pair holds only if the
+     * client advertised, in signature_algorithms, the exact signature algorithm
+     * that the server's PQ key will use. tls1_select_pq_sigalg derives that
+     * algorithm from the PQ key (key-aware); tls1_in_list checks the peer
+     * offered it. This is the same algorithm tls_construct_pq_cert_verify signs
+     * with, so a confirmed pair guarantees the PQCertificateVerify is
+     * verifiable. On success s3.tmp.pq_sigalg is set and
+     * SSL_CONNECTION_HYBRID_NEGOTIATED() becomes true; otherwise it stays NULL
+     * and the EncryptedExtensions echo is suppressed, falling the connection
+     * back to standard TLS 1.3 (no PQCertificateVerify).
+     */
+    s->s3.tmp.pq_sigalg = NULL;
+    if (s->cert->hybrid_cert_enabled && s->s3.tmp.hybrid_cert
+            && s->cert->pqkey != NULL && s->cert->pqkey->privatekey != NULL) {
+        const SIGALG_LOOKUP *key_pq_lu = NULL;
 
-        /* Use enhanced PQC signature algorithm selection */
-        const SIGALG_LOOKUP *selected_pq_lu = tls1_select_enhanced_pq_sigalg(s, 
-                                                                              s->cert->pqkey->privatekey,
-                                                                              s->s3.tmp.peer_dual_pq_sigalgs,
-                                                                              s->s3.tmp.peer_dual_pq_sigalgslen);
-        
-        if (selected_pq_lu != NULL) {
-            pq_lu = selected_pq_lu;
-            s->s3.tmp.pq_sigalg = pq_lu;
-        } else {
-    
-            pq_lu = lu;
+        if (tls1_select_pq_sigalg(s, s->cert->pqkey->privatekey, &key_pq_lu)
+                && key_pq_lu != NULL
+                && tls1_in_list(key_pq_lu->sigalg, s->s3.tmp.peer_sigalgs,
+                                s->s3.tmp.peer_sigalgslen)) {
+            pq_lu = key_pq_lu;
             s->s3.tmp.pq_sigalg = pq_lu;
         }
     }
@@ -4775,8 +4801,13 @@ int tls1_get_pq_security_bits(uint16_t sigalg)
     }
 }
 
-/* Enhanced dual algorithm selection for both classic and PQ */
-int tls1_select_dual_algorithms(SSL_CONNECTION *s, 
+/*
+ * Enhanced dual algorithm selection for both classic and PQ.
+ * NOTE: currently unused (no callers); tls_choose_sigalg performs the live
+ * key-aware pair selection. Kept compiling against signature_algorithms for
+ * now; it is a removal candidate in the dual_signature_algorithms cleanup.
+ */
+int tls1_select_dual_algorithms(SSL_CONNECTION *s,
                                 const SIGALG_LOOKUP **classic_lu,
                                 const SIGALG_LOOKUP **pq_lu)
 {
@@ -4807,9 +4838,9 @@ int tls1_select_dual_algorithms(SSL_CONNECTION *s,
     
     /* Select PQ signature algorithm */
     if (pq_pkey != NULL && SSL_CONNECTION_HYBRID_NEGOTIATED(s)) {
-        selected_pq = tls1_select_enhanced_pq_sigalg(s, pq_pkey, 
-                                                     s->s3.tmp.peer_dual_pq_sigalgs,
-                                                     s->s3.tmp.peer_dual_pq_sigalgslen);
+        selected_pq = tls1_select_enhanced_pq_sigalg(s, pq_pkey,
+                                                     s->s3.tmp.peer_sigalgs,
+                                                     s->s3.tmp.peer_sigalgslen);
         if (selected_pq == NULL) {
             *classic_lu = selected_classic;
             *pq_lu = NULL;
