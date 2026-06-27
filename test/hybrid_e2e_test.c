@@ -23,11 +23,14 @@
  *                          a permissive client falls back to traditional auth
  *   - mutual TLS         : the server verifies a client-presented dual cert
  *
- * Only the Dual (multi-certificate) format is driven end-to-end here; both the
- * send and receive sides of that format are fully wired.  The single-certificate
- * Catalyst send path is not wired (the server has no way to sign
- * PQCertificateVerify with a certificate's alternative private key), so Catalyst
- * is covered by the standalone chaining proof in test/phase4c_repro/ instead.
+ * Both hybrid formats are now driven end-to-end:
+ *   - Dual (multi-certificate): the server presents a separate PQC certificate.
+ *   - Catalyst (single-certificate): the server presents one certificate whose
+ *     PQC public key lives in a subjectAltPublicKeyInfo extension and signs the
+ *     PQCertificateVerify with the matching alternative private key loaded via
+ *     SSL_CTX_set_catalyst_alt_key().  The crypto contract of that send path
+ *     (alt-keypair coherence + chained sign/verify) is additionally proven by
+ *     the standalone test in test/phase4d_repro/.
  *
  * PQC operations require oqsprovider; if it cannot be loaded the tests skip.
  */
@@ -532,6 +535,97 @@ static int test_mutual_tls(void)
     return ok;
 }
 
+/*
+ * Build a hybrid pair where the server uses the single-certificate Catalyst
+ * format: its MAIN certificate carries the PQC public key in a
+ * subjectAltPublicKeyInfo extension, and the matching PQC private key is loaded
+ * through SSL_CTX_set_catalyst_alt_key().  No separate PQC certificate is
+ * installed or transmitted.  The client trusts the classical RSA CA (which also
+ * authenticates the embedded alt key via the alternative-signature chain check)
+ * and opts into hybrid auth.
+ */
+static int build_catalyst_pair(SSL_CTX **sctx, SSL_CTX **cctx)
+{
+    char *scert = cert_path("server_catalyst_cert.pem");
+    char *skey = cert_path("server_catalyst_key.pem");
+    X509 *catcert = load_cert("server_catalyst_cert.pem");
+    EVP_PKEY *altkey = load_key("server_catalyst_alt_key.pem");
+    char *carsa = cert_path("ca_rsa.pem");
+    int ok = 0;
+
+    *sctx = NULL;
+    *cctx = NULL;
+    if (!TEST_ptr(scert) || !TEST_ptr(skey) || !TEST_ptr(catcert)
+            || !TEST_ptr(altkey) || !TEST_ptr(carsa))
+        goto end;
+
+    /* Server presents the Catalyst certificate as its main certificate. */
+    if (!TEST_true(create_ssl_ctx_pair(NULL, TLS_server_method(),
+                                       TLS_client_method(),
+                                       TLS1_3_VERSION, TLS1_3_VERSION,
+                                       sctx, cctx, scert, skey)))
+        goto end;
+
+    /* Client verifies the server's (classical + alt) certificate via the RSA CA. */
+    if (!TEST_true(SSL_CTX_load_verify_file(*cctx, carsa)))
+        goto end;
+    SSL_CTX_set_verify(*cctx, SSL_VERIFY_PEER, NULL);
+
+    /* Server: enable hybrid and load the Catalyst alternative private key. */
+    if (!TEST_true(SSL_CTX_enable_dual_certs(*sctx))
+            || !TEST_true(SSL_CTX_set_catalyst_alt_key(*sctx, catcert, altkey)))
+        goto end;
+
+    /* Client: opt into hybrid auth (advertise hybrid_cert + PQ sigalgs). */
+    if (!TEST_true(SSL_CTX_enable_dual_certs(*cctx)))
+        goto end;
+
+    ok = 1;
+ end:
+    OPENSSL_free(scert);
+    OPENSSL_free(skey);
+    OPENSSL_free(carsa);
+    X509_free(catcert);
+    EVP_PKEY_free(altkey);
+    if (!ok) {
+        SSL_CTX_free(*sctx);
+        SSL_CTX_free(*cctx);
+        *sctx = NULL;
+        *cctx = NULL;
+    }
+    return ok;
+}
+
+/*
+ * Test 7: Catalyst happy path. The server signs PQCertificateVerify with the
+ * certificate's alternative private key; the client recovers the verifying key
+ * from the peer certificate's subjectAltPublicKeyInfo extension and verifies it.
+ * Hybrid must be negotiated and exactly one classical + one PQCertificateVerify
+ * must appear -- with NO second certificate on the wire (single-cert format).
+ */
+static int test_catalyst_happy_path(void)
+{
+    SSL_CTX *sctx = NULL, *cctx = NULL;
+    handshake_obs obs;
+    int negotiated = 0, ok = 0;
+
+    if (!have_oqs)
+        return TEST_skip("oqsprovider not available");
+    if (!build_catalyst_pair(&sctx, &cctx))
+        goto end;
+    if (!TEST_true(connect_observed(sctx, cctx, &obs, &negotiated, NULL, 0, 0)))
+        goto end;
+    if (!TEST_int_eq(negotiated, 1)
+            || !TEST_int_eq(obs.classical_cv, 1)
+            || !TEST_int_eq(obs.pq_cert_verify, 1))
+        goto end;
+    ok = 1;
+ end:
+    SSL_CTX_free(sctx);
+    SSL_CTX_free(cctx);
+    return ok;
+}
+
 int setup_tests(void)
 {
     if (!TEST_ptr(certsdir = test_get_argument(0)))
@@ -549,6 +643,7 @@ int setup_tests(void)
     ADD_TEST(test_downgrade_strict_no_echo);
     ADD_TEST(test_downgrade_permissive);
     ADD_TEST(test_mutual_tls);
+    ADD_TEST(test_catalyst_happy_path);
     return 1;
 }
 

@@ -8,9 +8,12 @@
 #     client mTLS dual : client_rsa_{cert,key}.pem + client_mldsa65_{cert,key}.pem
 #   Pair-matching control:
 #     server PQC key is mldsa65; a mldsa44-only client must NOT pair-match.
-#
-# The single-certificate Catalyst format has no generation CLI; it is built
-# programmatically by the C harness (hybrid_e2e_test.c) and is not produced here.
+#   Catalyst (single-certificate) format:
+#     server_catalyst_cert.pem  - RSA leaf (CA: ca_rsa) carrying the mldsa65 alt
+#                                 public key in subjectAltPublicKeyInfo plus a
+#                                 self alternative-signature (alt sig ext trio)
+#     server_catalyst_key.pem      - RSA main private key
+#     server_catalyst_alt_key.pem  - mldsa65 alternative private key (PQCertVerify)
 #
 # Requires the repo-built openssl with oqsprovider loadable. Run via the
 # wrapper that sets DYLD_LIBRARY_PATH + OPENSSL_MODULES (see run note below),
@@ -57,6 +60,24 @@ $OSSL req -new $PROV -key client_mldsa65_key.pem -out client_mldsa65_req.pem -su
 $OSSL x509 -req $PROV -in client_mldsa65_req.pem -CA ca_mldsa65.pem -CAkey ca_mldsa65_key.pem \
     -CAcreateserial -out client_mldsa65_cert.pem -days 3650
 rm -f client_mldsa65_req.pem
+
+# Catalyst single-certificate: RSA main key + mldsa65 alt key embedded in the
+# leaf via subjectAltPublicKeyInfo, self alternative-signed (the issuer ca_rsa
+# has no alt key, so alt_sig_validate_path checks the leaf against its own alt
+# key). The leaf is classically signed by ca_rsa so the client trusts it.
+$OSSL genpkey $PROV -algorithm mldsa65 -out server_catalyst_alt_key.pem
+$OSSL pkey $PROV -in server_catalyst_alt_key.pem -pubout -out server_catalyst_alt_pub.pem
+$OSSL genpkey $PROV -algorithm RSA -out server_catalyst_key.pem
+$OSSL req -new $PROV -key server_catalyst_key.pem -out server_catalyst_req.pem -subj "$SUBJ_SRV"
+cat > server_catalyst.ext <<EOF
+subjectAltPublicKeyInfo = file:server_catalyst_alt_pub.pem
+altSignatureAlgorithm = 2.16.840.1.101.3.4.3.18
+altSignatureValue = file:server_catalyst_alt_key.pem
+EOF
+$OSSL x509 -req $PROV -in server_catalyst_req.pem \
+    -CA ca_rsa.pem -CAkey ca_rsa_key.pem -CAcreateserial \
+    -out server_catalyst_cert.pem -days 3650 -extfile server_catalyst.ext
+rm -f server_catalyst_req.pem server_catalyst.ext server_catalyst_alt_pub.pem
 
 echo "Generated hybrid e2e cert assets in $DIR:"
 ls -1 *.pem
