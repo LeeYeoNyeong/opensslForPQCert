@@ -5085,7 +5085,6 @@ int is_pqc_only_certificate(SSL_CONNECTION *s)
                     strstr(key_type_name, "p384_sphincssha2192fsimple") != NULL ||
                     strstr(key_type_name, "p256_sphincsshake128fsimple") != NULL ||
                     strstr(key_type_name, "rsa3072_sphincsshake128fsimple") != NULL) {
-                    printf("[PQC_ONLY_DETECT] Found composite PQC certificate: %s\n", key_type_name);
                     return 1;
                 }
                 /* Detect pure PQC algorithms by exact name patterns (only if not composite) */
@@ -5107,54 +5106,16 @@ int is_pqc_only_certificate(SSL_CONNECTION *s)
         }
     }
     
-    /* Check PQC certificates */
-    if (s->cert->pqkey != NULL) {
-        EVP_PKEY *pq_pkey = s->cert->pqkey->privatekey;
-        if (pq_pkey != NULL) {
-            const char *key_type_name = EVP_PKEY_get0_type_name(pq_pkey);
-            if (key_type_name != NULL) {
-                /* Check composite algorithms first, before pure PQC */
-                if (strstr(key_type_name, "p256_mldsa44") != NULL ||
-                    strstr(key_type_name, "rsa3072_mldsa44") != NULL ||
-                    strstr(key_type_name, "p384_mldsa65") != NULL ||
-                    strstr(key_type_name, "mldsa65_pss3072") != NULL ||
-                    strstr(key_type_name, "mldsa65_rsa3072") != NULL ||
-                    strstr(key_type_name, "mldsa65_p256") != NULL ||
-                    strstr(key_type_name, "p521_mldsa87") != NULL ||
-                    strstr(key_type_name, "mldsa87_p384") != NULL ||
-                    strstr(key_type_name, "p256_falcon512") != NULL ||
-                    strstr(key_type_name, "rsa3072_falcon512") != NULL ||
-                    strstr(key_type_name, "p256_falconpadded512") != NULL ||
-                    strstr(key_type_name, "rsa3072_falconpadded512") != NULL ||
-                    strstr(key_type_name, "p521_falcon1024") != NULL ||
-                    strstr(key_type_name, "p521_falconpadded1024") != NULL ||
-                    strstr(key_type_name, "p256_sphincssha2128fsimple") != NULL ||
-                    strstr(key_type_name, "rsa3072_sphincssha2128fsimple") != NULL ||
-                    strstr(key_type_name, "p256_sphincssha2128ssimple") != NULL ||
-                    strstr(key_type_name, "rsa3072_sphincssha2128ssimple") != NULL ||
-                    strstr(key_type_name, "p384_sphincssha2192fsimple") != NULL ||
-                    strstr(key_type_name, "p256_sphincsshake128fsimple") != NULL ||
-                    strstr(key_type_name, "rsa3072_sphincsshake128fsimple") != NULL) {
-                    return 1;
-                }
-                /* Detect pure PQC algorithms by exact name patterns (only if not composite) */
-                if ((strstr(key_type_name, "mldsa44") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "mldsa65") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "mldsa87") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falcon512") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falcon1024") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falconpadded512") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falconpadded1024") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2128ssimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincsshake128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2192fsimple") != NULL && strchr(key_type_name, '_') == NULL)) {
-                    return 1;
-                }
-            }
-        }
-    }
-    
+    /*
+     * A separate dual PQ key (s->cert->pqkey) does NOT make the certificate
+     * PQC-only: that is the dual (hybrid) configuration, whose main certificate
+     * is classical and which therefore still sends a classical CertificateVerify
+     * before the PQCertificateVerify. A genuinely PQC-only certificate has its
+     * MAIN key set to the PQC key and is detected by the peer/main-key checks
+     * above. Treating the dual pqkey as PQC-only made a dual server skip the
+     * classical CertificateVerify and emit a PQCertificateVerify even when
+     * hybrid auth was not negotiated, breaking non-hybrid clients.
+     */
     return 0;
 }
 
