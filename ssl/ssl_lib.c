@@ -8161,7 +8161,32 @@ int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF
     return 1;
 }
 
+/*
+ * Load the Catalyst alternative (PQC) private key for single-certificate hybrid
+ * authentication. The main certificate (with its classical key) is configured
+ * through the normal SSL_CTX_use_certificate/PrivateKey path; this call only
+ * supplies the PQC private key matching the certificate's subjectAltPublicKeyInfo
+ * extension. No second certificate is installed or transmitted.
+ */
+int SSL_CTX_set_catalyst_alt_key(SSL_CTX *ctx, X509 *cert, EVP_PKEY *altkey)
+{
+    if (ctx == NULL || ctx->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+    return ssl_cert_set_catalyst_alt_key(ctx->cert, cert, altkey);
+}
 
+int SSL_set_catalyst_alt_key(SSL *s, X509 *cert, EVP_PKEY *altkey)
+{
+    SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(s);
+
+    if (sc == NULL || sc->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+    return ssl_cert_set_catalyst_alt_key(sc->cert, cert, altkey);
+}
 
 /*
  * Détection fiable du type de clé (classique ou PQC)

@@ -91,6 +91,7 @@ CERT *ssl_cert_new(size_t ssl_pkey_num)
     ret->pq_chain_store = NULL;
     ret->hybrid_cert_enabled = 0;
     ret->hybrid_cert_required = 0;
+    ret->alt_privatekey = NULL;
 
     if (!CRYPTO_NEW_REF(&ret->references, 1)) {
         OPENSSL_free(ret->pkeys);
@@ -276,6 +277,11 @@ CERT *ssl_cert_dup(CERT *cert)
         }
     }
 
+    if (cert->alt_privatekey != NULL) {
+        ret->alt_privatekey = cert->alt_privatekey;
+        EVP_PKEY_up_ref(ret->alt_privatekey);
+    }
+
     return ret;
 
  err:
@@ -326,6 +332,8 @@ void ssl_cert_clear_certs(CERT *c)
         c->pqkey->serverinfo = NULL;
         c->pqkey->serverinfo_length = 0;
     }
+    EVP_PKEY_free(c->alt_privatekey);
+    c->alt_privatekey = NULL;
     ssl_cert_clear_pq_chain(c);
 }
 
@@ -662,6 +670,85 @@ int ssl_cert_set_pq_certificate(CERT *c, X509 *cert, EVP_PKEY *key, STACK_OF(X50
             return 0;
         }
     }
+
+    return 1;
+}
+
+/*
+ * Return 1 iff |cert| carries a subjectAltPublicKeyInfo extension whose public
+ * key matches |altkey| (the Catalyst alternative private key). Used at load
+ * time and again on the handshake path to bind the alt key to the certificate
+ * actually selected. Unlike X509_get_alt_pubkey(), this frees the decoded
+ * X509_PUBKEY, so it can be called per handshake without leaking.
+ */
+int ssl_cert_catalyst_altkey_matches(X509 *cert, EVP_PKEY *altkey)
+{
+    int i, rv = 0;
+    X509_EXTENSION *ext;
+    X509_PUBKEY *xpk;
+    EVP_PKEY *altpub;
+
+    if (cert == NULL || altkey == NULL)
+        return 0;
+    if ((i = X509_get_ext_by_NID(cert, NID_subject_alt_public_key_info, -1)) < 0)
+        return 0;
+    if ((ext = X509_get_ext(cert, i)) == NULL)
+        return 0;
+    if ((xpk = X509V3_EXT_d2i(ext)) == NULL)
+        return 0;
+    altpub = X509_PUBKEY_get0(xpk); /* borrowed from xpk */
+    rv = (altpub != NULL && EVP_PKEY_eq(altpub, altkey) == 1);
+    X509_PUBKEY_free(xpk);
+    return rv;
+}
+
+/*
+ * Load the Catalyst alternative (PQC) private key. Unlike the dual-certificate
+ * loader above, this does NOT install a second certificate: the Catalyst PQC
+ * public key already lives in the main certificate's subjectAltPublicKeyInfo
+ * extension. The private key is validated against THAT alternative public key
+ * (not the certificate's main key), so it can never silently install an
+ * unrelated key. It is consumed only when producing the PQCertificateVerify
+ * proof-of-possession on the server side.
+ */
+int ssl_cert_set_catalyst_alt_key(CERT *c, X509 *cert, EVP_PKEY *altkey)
+{
+    if (c == NULL || cert == NULL || altkey == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+
+    if (!c->hybrid_cert_enabled) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_DUAL_CERTS_NOT_ENABLED);
+        return 0;
+    }
+
+    /*
+     * The certificate must carry the alternative public key for which this is
+     * the matching private key. Without it there is nothing to bind against.
+     */
+    if (X509_get_ext_by_NID(cert, NID_subject_alt_public_key_info, -1) < 0) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
+        return 0;
+    }
+
+    /*
+     * Enforce keypair coherence against the ALTERNATIVE public key. This is the
+     * Catalyst analogue of X509_check_private_key (which would test the main
+     * key and reject the alt key): EVP_PKEY_eq compares the public components,
+     * so a private key carrying a mismatched public part is refused.
+     */
+    if (!ssl_cert_catalyst_altkey_matches(cert, altkey)) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_PRIVATE_KEY_MISMATCH);
+        return 0;
+    }
+
+    if (!EVP_PKEY_up_ref(altkey)) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_EVP_LIB);
+        return 0;
+    }
+    EVP_PKEY_free(c->alt_privatekey);
+    c->alt_privatekey = altkey;
 
     return 1;
 }

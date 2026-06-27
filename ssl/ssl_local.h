@@ -2230,6 +2230,14 @@ typedef struct cert_st {
     X509_STORE *pq_chain_store;   /* Store pour construction chaîne PQC */
     int hybrid_cert_enabled;   /* Server is configured for hybrid certificates */
     int hybrid_cert_required;  /* Client strict policy: hybrid auth MUST complete */
+    /*
+     * Catalyst single-certificate hybrid: the PQC private key whose public
+     * counterpart lives in the main certificate's subjectAltPublicKeyInfo
+     * extension. Unlike pqkey (multi-certificate dual mode), this never causes
+     * a second certificate to be transmitted; it is only used to produce the
+     * PQCertificateVerify proof-of-possession.
+     */
+    EVP_PKEY *alt_privatekey;
     CRYPTO_REF_COUNT references;             /* >1 only if SSL_copy_session_id is used */
 } CERT;
 /* Post-quantum signature algorithm functions for dual certificate mode */
@@ -2719,6 +2727,8 @@ __owur STACK_OF(X509) *ssl_cert_get0_pq_chain(SSL_CONNECTION *s, SSL_CTX *ctx);
 __owur STACK_OF(X509) *ssl_cert_get1_pq_chain(SSL_CONNECTION *s, SSL_CTX *ctx);
 void ssl_cert_clear_pq_chain(CERT *c);
 __owur int ssl_cert_set_pq_certificate(CERT *c, X509 *cert, EVP_PKEY *key, STACK_OF(X509) *chain);
+__owur int ssl_cert_set_catalyst_alt_key(CERT *c, X509 *cert, EVP_PKEY *altkey);
+__owur int ssl_cert_catalyst_altkey_matches(X509 *cert, EVP_PKEY *altkey);
 
 __owur int ssl_verify_cert_chain(SSL_CONNECTION *s, STACK_OF(X509) *sk);
 __owur int ssl_verify_rpk(SSL_CONNECTION *s, EVP_PKEY *rpk);
