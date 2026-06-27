@@ -123,6 +123,8 @@ __owur int tls_process_initial_server_flight(SSL_CONNECTION *s);
 __owur MSG_PROCESS_RETURN tls_process_change_cipher_spec(SSL_CONNECTION *s,
                                                          PACKET *pkt);
 __owur MSG_PROCESS_RETURN tls_process_finished(SSL_CONNECTION *s, PACKET *pkt);
+__owur int ssl_verify_chameleon_dcd(SSL_CONNECTION *s, X509 *base,
+                                    STACK_OF(X509) *chain);
 __owur CON_FUNC_RETURN  tls_construct_change_cipher_spec(SSL_CONNECTION *s,
                                                          WPACKET *pkt);
 __owur CON_FUNC_RETURN dtls_construct_change_cipher_spec(SSL_CONNECTION *s,

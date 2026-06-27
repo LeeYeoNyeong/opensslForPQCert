@@ -3805,6 +3805,19 @@ MSG_PROCESS_RETURN tls_process_client_certificate(SSL_CONNECTION *s,
     s->session->peer_rpk = NULL;
 
     /*
+     * Single-certificate Chameleon (mutual TLS): the client may present a Base
+     * certificate carrying a deltaCertificateDescriptor. Establish the
+     * certificate-level trust of the reconstructed Delta before its key is used
+     * to satisfy the client's PQCertificateVerify proof-of-possession. No-op
+     * when the client cert is not a Chameleon cert or hybrid is not in effect.
+     */
+    if (!ssl_verify_chameleon_dcd(s, s->session->peer,
+                                  s->session->peer_chain)) {
+        SSLfatal(s, SSL_AD_BAD_CERTIFICATE, SSL_R_CERTIFICATE_VERIFY_FAILED);
+        goto err;
+    }
+
+    /*
      * Freeze the handshake buffer. For <TLS1.3 we do this after the CKE
      * message
      */

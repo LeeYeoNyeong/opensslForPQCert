@@ -2229,6 +2229,27 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
     }
 
     /*
+     * Single-certificate Chameleon: establish the certificate-level trust of
+     * the reconstructed Delta certificate (its chain to the trusted PQ root).
+     * Counterpart of the Catalyst alternative-signature validation done inside
+     * ssl_verify_cert_chain() above. No-op when the peer is not a Chameleon
+     * cert or hybrid auth is not in effect.
+     */
+    if (!ssl_verify_chameleon_dcd(s, sk_X509_value(s->session->peer_chain, 0),
+                                  s->session->peer_chain)) {
+        SSLfatal(s, SSL_AD_BAD_CERTIFICATE, SSL_R_CERTIFICATE_VERIFY_FAILED);
+        return WORK_ERROR;
+    }
+    /*
+     * Preserve asynchronous verification semantics: the verify callback used
+     * while validating the reconstructed Delta may request a retry via
+     * SSL_set_retry_verify() (success + rwstate == SSL_RETRY_VERIFY), exactly
+     * as for the main and PQC chains above. Pause the handshake if so.
+     */
+    if (s->rwstate == SSL_RETRY_VERIFY)
+        return WORK_MORE_A;
+
+    /*
      * Inconsistency alert: cert_chain does include the peer's certificate,
      * which we don't include in statem_srvr.c
      */

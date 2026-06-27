@@ -774,6 +774,72 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
 #endif
     return ret;
 }
+/*
+ * Single-certificate Chameleon certificate-level trust. When the peer leaf
+ * 'base' carries a deltaCertificateDescriptor and hybrid authentication is in
+ * effect, reconstruct the Delta certificate and run FULL X.509 path validation
+ * on it (ssl_verify_cert_chain -> X509_verify_cert with the SSL verification
+ * parameters: signature, validity period, CA/basic constraints, key usage,
+ * name constraints, depth, policy, ...). ssl_verify_cert_chain automatically
+ * selects the PQ verify store for the Delta's PQ key. This is the single-
+ * certificate counterpart of the Catalyst alternative-signature validation done
+ * inside ssl_verify_cert_chain (X509v3_alt_sig_validate_path) and, like it, must
+ * run on BOTH peer-authentication directions (client verifying the server, and
+ * server verifying a mutual-TLS client) so that the PQCertificateVerify PoP in
+ * tls_process_pq_certificate_verify cannot be satisfied with an untrusted Delta
+ * key. 'chain' supplies the untrusted issuer CAs for the Delta. Returns 1 when
+ * trust holds or when there is nothing to validate (no DCD, hybrid not in
+ * effect, or verification disabled), 0 on validation failure.
+ */
+int ssl_verify_chameleon_dcd(SSL_CONNECTION *s, X509 *base,
+                             STACK_OF(X509) *chain)
+{
+    DeltaCertificateDescriptor *dcd;
+    X509 *delta = NULL;
+    STACK_OF(X509) *vchain = NULL;
+    int ok = 0, i;
+
+    if (base == NULL || s->cert == NULL
+            || !(s->cert->hybrid_cert_enabled && s->s3.tmp.hybrid_cert))
+        return 1;
+    if (X509_get_ext_by_NID(base, NID_id_ce_deltaCertificateDescriptor, -1) < 0)
+        return 1;
+    if (s->verify_mode == SSL_VERIFY_NONE)
+        return 1;
+
+    /* Reconstruct the Delta certificate from the Base and its DCD. */
+    dcd = X509_get_ext_d2i(base, NID_id_ce_deltaCertificateDescriptor,
+                           NULL, NULL);
+    if (dcd == NULL)
+        return 0;
+    delta = reconstruct_delta(base, dcd);
+    DeltaCertificateDescriptor_free(dcd);
+    if (delta == NULL)
+        return 0;
+
+    /*
+     * Build the verification stack: the reconstructed Delta as the leaf, with
+     * the Base's issuer certificates as untrusted CAs. The Base itself is
+     * excluded (it shares the Delta's subject and is not the Delta's issuer).
+     */
+    vchain = sk_X509_new_null();
+    if (vchain == NULL || !sk_X509_push(vchain, delta))
+        goto end;
+    for (i = 0; i < sk_X509_num(chain); i++) {
+        X509 *c = sk_X509_value(chain, i);
+
+        if (c != base && c != NULL && !sk_X509_push(vchain, c))
+            goto end;
+    }
+
+    ok = ssl_verify_cert_chain(s, vchain) > 0;
+
+ end:
+    sk_X509_free(vchain);   /* container only; members owned elsewhere/below */
+    X509_free(delta);
+    return ok;
+}
+
 MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *pkt)
 {
     EVP_PKEY *pq_pkey = NULL;
