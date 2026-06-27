@@ -379,5 +379,6 @@
 # define SSL_R_DUAL_CERTS_NOT_ENABLED                     1121
 # define SSL_R_OQS_PROVIDER_NOT_AVAILABLE                 1122
 # define SSL_R_NO_PQC_ALGORITHMS_AVAILABLE                1123
+# define SSL_R_HYBRID_CERT_DOWNGRADE                      1124
 
 #endif

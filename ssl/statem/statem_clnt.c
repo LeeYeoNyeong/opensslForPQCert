@@ -188,6 +188,19 @@ static int ossl_statem_client13_read_transition(SSL_CONNECTION *s, int mt)
             return 1;
         }
         if (mt == SSL3_MT_FINISHED) {
+            /*
+             * Strict hybrid policy (opt-in): hybrid auth was negotiated (the
+             * server echoed hybrid_cert), so a PQCertificateVerify MUST follow
+             * the classical CertificateVerify. Finished here means the PQC proof
+             * was stripped on the path -> abort. The attacker cannot forge the
+             * PQC signature, so refusing to fall back is the downgrade defense;
+             * it rests on the client's strict policy, not on the echo's position.
+             */
+            if (s->cert != NULL && s->cert->hybrid_cert_enabled
+                    && s->cert->hybrid_cert_required && s->s3.tmp.hybrid_cert) {
+                SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE, SSL_R_HYBRID_CERT_DOWNGRADE);
+                return 0;
+            }
             st->hand_state = TLS_ST_CR_FINISHED;
             return 1;
         }
@@ -4314,6 +4327,21 @@ static MSG_PROCESS_RETURN tls_process_encrypted_extensions(SSL_CONNECTION *s,
             || !tls_parse_all_extensions(s, SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS,
                                          rawexts, NULL, 0, 1)) {
         /* SSLfatal() already called */
+        goto err;
+    }
+
+    /*
+     * Strict hybrid policy (opt-in): the client advertised hybrid_cert and
+     * requires hybrid authentication, so the server MUST echo hybrid_cert in
+     * EncryptedExtensions. A missing echo means hybrid was not negotiated -
+     * possibly an on-path downgrade that stripped our advertisement or the
+     * echo - so abort instead of silently accepting traditional-only auth.
+     * The defense rests on the client's strict policy plus PQC unforgeability,
+     * not on where the echo sits or whether it is encrypted.
+     */
+    if (s->cert != NULL && s->cert->hybrid_cert_enabled
+            && s->cert->hybrid_cert_required && !s->s3.tmp.hybrid_cert) {
+        SSLfatal(s, SSL_AD_MISSING_EXTENSION, SSL_R_HYBRID_CERT_DOWNGRADE);
         goto err;
     }
 

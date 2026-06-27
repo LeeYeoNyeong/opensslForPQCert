@@ -8020,6 +8020,39 @@ int SSL_CTX_enable_dual_certs(SSL_CTX *ctx)
     return 1;
 }
 
+/*
+ * Opt-in strict hybrid policy. When set on a client, a hybrid_cert capability
+ * that the client advertised MUST be honoured by the peer: the server has to
+ * echo hybrid_cert in EncryptedExtensions and send a PQCertificateVerify, or
+ * the handshake is aborted. The downgrade defense rests on this strict client
+ * policy combined with the unforgeability of the PQC signature - an on-path
+ * attacker that strips the echo or the PQCertificateVerify cannot forge the
+ * PQC proof, so the client refuses to fall back to traditional-only auth. The
+ * default is permissive (off) for backward compatibility; permissive clients
+ * accept a standard TLS handshake when the peer does not negotiate hybrid.
+ */
+int SSL_CTX_set_hybrid_cert_required(SSL_CTX *ctx, int required)
+{
+    if (ctx == NULL || ctx->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+    ctx->cert->hybrid_cert_required = required ? 1 : 0;
+    return 1;
+}
+
+int SSL_set_hybrid_cert_required(SSL *s, int required)
+{
+    SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(s);
+
+    if (sc == NULL || sc->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+    sc->cert->hybrid_cert_required = required ? 1 : 0;
+    return 1;
+}
+
 /* Set post-quantum certificate, private key and chain for dual certificate mode */
 int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF(X509) *chain)
 {

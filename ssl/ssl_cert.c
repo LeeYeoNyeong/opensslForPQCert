@@ -90,7 +90,8 @@ CERT *ssl_cert_new(size_t ssl_pkey_num)
     ret->pq_verify_store = NULL;
     ret->pq_chain_store = NULL;
     ret->hybrid_cert_enabled = 0;
-    
+    ret->hybrid_cert_required = 0;
+
     if (!CRYPTO_NEW_REF(&ret->references, 1)) {
         OPENSSL_free(ret->pkeys);
         OPENSSL_free(ret);
@@ -229,7 +230,8 @@ CERT *ssl_cert_dup(CERT *cert)
 #endif
 
     ret->hybrid_cert_enabled = cert->hybrid_cert_enabled;
-    
+    ret->hybrid_cert_required = cert->hybrid_cert_required;
+
     if (cert->pq_verify_store != NULL) {
         X509_STORE_up_ref(cert->pq_verify_store);
         ret->pq_verify_store = cert->pq_verify_store;

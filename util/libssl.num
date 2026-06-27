@@ -590,4 +590,6 @@ SSL_SESSION_get0_peer_pqc_chain         590	3_3_0	EXIST::FUNCTION:
 SSL_SESSION_has_dual_certs              591	3_3_0	EXIST::FUNCTION:
 SSL_get_dual_certs_enabled              592	3_3_0	EXIST::FUNCTION:
 SSL_CTX_set_pq_client_CA_list           593     3_3_0   EXIST::FUNCTION:
+SSL_CTX_set_hybrid_cert_required        594     3_3_0   EXIST::FUNCTION:
+SSL_set_hybrid_cert_required            595     3_3_0   EXIST::FUNCTION:
 

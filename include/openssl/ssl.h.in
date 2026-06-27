@@ -1799,6 +1799,8 @@ __owur int SSL_CTX_use_cert_and_key(SSL_CTX *ctx, X509 *x509, EVP_PKEY *privatek
 
 __owur int SSL_CTX_enable_dual_certs(SSL_CTX *ctx);
 __owur int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF(X509) *chain);
+__owur int SSL_CTX_set_hybrid_cert_required(SSL_CTX *ctx, int required);
+__owur int SSL_set_hybrid_cert_required(SSL *s, int required);
 
 void SSL_CTX_set_default_passwd_cb(SSL_CTX *ctx, pem_password_cb *cb);
 void SSL_CTX_set_default_passwd_cb_userdata(SSL_CTX *ctx, void *u);

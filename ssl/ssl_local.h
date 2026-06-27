@@ -2235,6 +2235,7 @@ typedef struct cert_st {
     X509_STORE *pq_verify_store;  /* Store pour validation PQC */
     X509_STORE *pq_chain_store;   /* Store pour construction chaîne PQC */
     int hybrid_cert_enabled;   /* Server is configured for hybrid certificates */
+    int hybrid_cert_required;  /* Client strict policy: hybrid auth MUST complete */
     CRYPTO_REF_COUNT references;             /* >1 only if SSL_copy_session_id is used */
 } CERT;
 /* Post-quantum signature algorithm functions for dual certificate mode */
