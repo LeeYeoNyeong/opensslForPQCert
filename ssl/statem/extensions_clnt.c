@@ -317,10 +317,9 @@ EXT_RETURN tls_construct_ctos_sig_algs(SSL_CONNECTION *s, WPACKET *pkt,
 
     /*
      * When configured for hybrid certificates, also advertise our PQ signature
-     * algorithms in this standard signature_algorithms list. As of Phase 4b the
-     * server selects the hybrid certificate's PQ algorithm from this single
-     * list, so the PQ schemes must appear here and not only in the (legacy)
-     * dual_signature_algorithms extension. Gated on hybrid_cert_enabled, so a
+     * algorithms in this standard signature_algorithms list. The server selects
+     * the hybrid certificate's PQ algorithm from this single list, so the PQ
+     * schemes must appear here. Gated on hybrid_cert_enabled, so a
      * non-hybrid ClientHello is byte-for-byte unchanged. tls12_get_pq_sigalgs
      * returns the advertisable (non-composite) PQ schemes.
      */
@@ -2234,147 +2233,6 @@ int tls_parse_stoc_server_cert_type(SSL_CONNECTION *sc, PACKET *pkt,
     return 1;
 }
 
-int tls_parse_ctos_dual_sig_algs(SSL_CONNECTION *s, PACKET *pkt, unsigned int context, X509 *x, size_t chainidx)
-{
-    PACKET classical_sig_algs, pq_sig_algs;
-    size_t classical_sig_algs_len, pq_sig_algs_len;
-    
-    
-    /* Parse the classical signature algorithms */
-    if (!PACKET_get_length_prefixed_2(pkt, &classical_sig_algs)) {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
-        return 0;
-    }
-    
-    /* Parse the post-quantum signature algorithms */
-    if (!PACKET_get_length_prefixed_2(pkt, &pq_sig_algs)) {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
-        return 0;
-    }
-    
-    /* Store the classical signature algorithms */
-    classical_sig_algs_len = PACKET_remaining(&classical_sig_algs);
-    if (classical_sig_algs_len > 0) {
-        size_t num_algs = classical_sig_algs_len / 2;
-        s->s3.tmp.peer_dual_sigalgs = OPENSSL_malloc(num_algs * sizeof(uint16_t));
-        if (s->s3.tmp.peer_dual_sigalgs == NULL) {
-            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_MALLOC_FAILURE);
-            return 0;
-        }
-        
-        /* Read each 16-bit algorithm value */
-        for (size_t i = 0; i < num_algs; i++) {
-            unsigned int alg;
-            if (!PACKET_get_net_2(&classical_sig_algs, &alg)) {
-                SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
-                return 0;
-            }
-            s->s3.tmp.peer_dual_sigalgs[i] = (uint16_t)alg;
-        }
-        s->s3.tmp.peer_dual_sigalgslen = num_algs * sizeof(uint16_t);
-    }
-    
-    /* Store the post-quantum signature algorithms */
-    pq_sig_algs_len = PACKET_remaining(&pq_sig_algs);
-    if (pq_sig_algs_len > 0) {
-        size_t num_algs = pq_sig_algs_len / 2;
-        s->s3.tmp.peer_dual_pq_sigalgs = OPENSSL_malloc(num_algs * sizeof(uint16_t));
-        if (s->s3.tmp.peer_dual_pq_sigalgs == NULL) {
-            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_MALLOC_FAILURE);
-            return 0;
-        }
-        
-        /* Read each 16-bit algorithm value */
-        for (size_t i = 0; i < num_algs; i++) {
-            unsigned int alg;
-            if (!PACKET_get_net_2(&pq_sig_algs, &alg)) {
-                SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
-                return 0;
-            }
-            s->s3.tmp.peer_dual_pq_sigalgs[i] = (uint16_t)alg;
-        }
-        s->s3.tmp.peer_dual_pq_sigalgslen = num_algs * sizeof(uint16_t);
-    }
-    
-    
-    
-    if (PACKET_remaining(pkt) != 0) {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
-        return 0;
-    }
-    
-    return 1;
-}
 
-EXT_RETURN tls_construct_ctos_dual_sig_algs(SSL_CONNECTION *s, WPACKET *pkt, unsigned int context, X509 *x, size_t chainidx)
-{
-    const uint16_t *classical_sigalgs = NULL;
-    const uint16_t *pq_sigalgs = NULL;
-    size_t classical_sigalgslen = 0, pq_sigalgslen = 0;
-    
-    
-    /* Get the classical signature algorithms */
-    if (!get_dual_classical_sigalgs(s, &classical_sigalgs, &classical_sigalgslen)) {
-        return EXT_RETURN_NOT_SENT;
-    }
-    
-    /* Get the post-quantum signature algorithms */
-    if (!get_dual_pq_sigalgs(s, &pq_sigalgs, &pq_sigalgslen)) {
-        return EXT_RETURN_NOT_SENT;
-    }
-    
-    
-    /* Don't send if we have no algorithms */
-    if (classical_sigalgslen == 0 && pq_sigalgslen == 0) {
-        return EXT_RETURN_NOT_SENT;
-    }
-    
-    if (!WPACKET_put_bytes_u16(pkt, TLSEXT_TYPE_dual_signature_algorithms)
-        || !WPACKET_start_sub_packet_u16(pkt)) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-        return EXT_RETURN_FAIL;
-    }
-    
-    /* Write classical signature algorithms */
-    if (!WPACKET_start_sub_packet_u16(pkt)) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-        return EXT_RETURN_FAIL;
-    }
-    
-    for (size_t i = 0; i < classical_sigalgslen; i++) {
-        if (!WPACKET_put_bytes_u16(pkt, classical_sigalgs[i])) {
-            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-            return EXT_RETURN_FAIL;
-        }
-    }
-    if (!WPACKET_close(pkt)) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-        return EXT_RETURN_FAIL;
-    }
-    
-    /* Write post-quantum signature algorithms */
-    if (!WPACKET_start_sub_packet_u16(pkt)) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-        return EXT_RETURN_FAIL;
-    }
-    
-    for (size_t i = 0; i < pq_sigalgslen; i++) {
-        if (!WPACKET_put_bytes_u16(pkt, pq_sigalgs[i])) {
-            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-            return EXT_RETURN_FAIL;
-        }
-    }
-    if (!WPACKET_close(pkt)) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-        return EXT_RETURN_FAIL;
-    }
-    
-    if (!WPACKET_close(pkt)) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-        return EXT_RETURN_FAIL;
-    }
-    
-    return EXT_RETURN_SENT;
-}
 
 

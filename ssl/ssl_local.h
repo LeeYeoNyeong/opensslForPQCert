@@ -737,8 +737,6 @@ typedef enum tlsext_index_en {
     TLSEXT_IDX_hybrid_cert,
     TLSEXT_IDX_padding,
     TLSEXT_IDX_psk,
-    TLSEXT_IDX_dual_signature_algorithms,
-    TLSEXT_IDX_related_certificate,
     /* Dummy index - must always be the last entry */
     TLSEXT_IDX_num_builtins
 } TLSEXT_INDEX;
@@ -1410,12 +1408,6 @@ struct ssl_connection_st {
             /* Size of above arrays */
             size_t peer_sigalgslen;
             size_t peer_cert_sigalgslen;
-            /* Dual signature algorithms peer reports for post-quantum readiness */
-            uint16_t *peer_dual_sigalgs;
-            uint16_t *peer_dual_pq_sigalgs;
-            /* Size of above dual signature algorithm arrays */
-            size_t peer_dual_sigalgslen;
-            size_t peer_dual_pq_sigalgslen;
             /*
              * Set when the peer sent the hybrid_cert capability flag: on the
              * server it means the client advertised it in ClientHello; on the
@@ -1888,7 +1880,8 @@ struct ssl_connection_st {
     /*
      * Dual signature algorithms for post-quantum readiness.
      * These contain two lists: first_signature_algorithms and second_signature_algorithms.
-     * When set on a client this is sent in the client hello as the dual_signature_algorithms extension.
+     * The PQ entries are advertised in the standard signature_algorithms
+     * extension (the separate dual_signature_algorithms extension was removed).
      * For servers it represents the dual signature algorithms we are willing to use.
      */
     uint16_t *dual_conf_sigalgs;
@@ -2186,7 +2179,8 @@ typedef struct cert_st {
     /*
      * Dual signature algorithms for post-quantum readiness.
      * These contain two lists: first_signature_algorithms and second_signature_algorithms.
-     * When set on a client this is sent in the client hello as the dual_signature_algorithms extension.
+     * The PQ entries are advertised in the standard signature_algorithms
+     * extension (the separate dual_signature_algorithms extension was removed).
      * For servers it represents the dual signature algorithms we are willing to use.
      */
     uint16_t *dual_conf_sigalgs;

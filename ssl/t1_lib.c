@@ -80,14 +80,6 @@ static const SIGALG_LOOKUP *tls1_lookup_pq_sigalg(const SSL_CONNECTION *s,
 static const SIGALG_LOOKUP *tls1_lookup_composite_sigalg(const SSL_CONNECTION *s,
                                                          uint16_t sigalg);
 static int is_composite_sigalg(uint16_t sigalg);
-static const SIGALG_LOOKUP *tls1_select_enhanced_pq_sigalg(SSL_CONNECTION *s,
-                                                           const EVP_PKEY *pq_pkey,
-                                                           const uint16_t *peer_pq_sigs,
-                                                           size_t peer_pq_sigslen);
-static const SIGALG_LOOKUP *tls1_select_enhanced_classic_sigalg(SSL_CONNECTION *s,
-                                                                const EVP_PKEY *classic_pkey,
-                                                                const uint16_t *peer_classic_sigs,
-                                                                size_t peer_classic_sigslen);
 static int get_pqc_key_type_enhanced(const EVP_PKEY *pq_pkey);
 static int get_pqc_key_type_by_properties(const EVP_PKEY *pq_pkey);
 
@@ -4710,54 +4702,6 @@ int tls1_set_raw_pq_sigalgs(CERT *c, const uint16_t *psigs, size_t salglen,
     return 1;
 }
 
-/* Enhanced PQ signature algorithm selection with preference ordering */
-static const SIGALG_LOOKUP *tls1_select_enhanced_pq_sigalg(SSL_CONNECTION *s, 
-                                                           const EVP_PKEY *pq_pkey,
-                                                           const uint16_t *peer_pq_sigs,
-                                                           size_t peer_pq_sigslen)
-{
-    const uint16_t *local_pq_sigs;
-    size_t local_pq_sigslen, i, j;
-    const SIGALG_LOOKUP *lu = NULL;
-    /* Get local PQ signature algorithms */
-    local_pq_sigslen = tls12_get_pq_sigalgs(s, 0, &local_pq_sigs);
-    
-    
-    /* Server preference: check local algorithms first, then peer algorithms */
-    if (s->server) {
-
-        /* First, find the highest priority local algorithm that peer supports */
-        for (i = 0; i < local_pq_sigslen; i++) {
-            lu = tls1_lookup_pq_sigalg(s, local_pq_sigs[i]);
-            if (lu == NULL)
-                continue;
-                
-            /* Check if peer supports this algorithm */
-            for (j = 0; j < peer_pq_sigslen; j++) {
-                if (local_pq_sigs[i] == peer_pq_sigs[j]) {
-                    return lu;
-                }
-            }
-        }
-    } else {
-        /* Client preference: check peer algorithms first, then local algorithms */
-        for (i = 0; i < peer_pq_sigslen; i++) {
-            lu = tls1_lookup_pq_sigalg(s, peer_pq_sigs[i]);
-            if (lu == NULL)
-                continue;
-                
-            /* Check if we support this algorithm */
-            for (j = 0; j < local_pq_sigslen; j++) {
-                if (peer_pq_sigs[i] == local_pq_sigs[j]) {
-                    return lu;
-                }
-            }
-        }
-    }
-    
-
-    return NULL;
-}
 
 
 /* Get security level in bits for PQ signature algorithms */
@@ -4801,113 +4745,6 @@ int tls1_get_pq_security_bits(uint16_t sigalg)
     }
 }
 
-/*
- * Enhanced dual algorithm selection for both classic and PQ.
- * NOTE: currently unused (no callers); tls_choose_sigalg performs the live
- * key-aware pair selection. Kept compiling against signature_algorithms for
- * now; it is a removal candidate in the dual_signature_algorithms cleanup.
- */
-int tls1_select_dual_algorithms(SSL_CONNECTION *s,
-                                const SIGALG_LOOKUP **classic_lu,
-                                const SIGALG_LOOKUP **pq_lu)
-{
-    const uint16_t *classic_sigs, *pq_sigs;
-    size_t classic_sigslen;
-    const SIGALG_LOOKUP *selected_classic = NULL;
-    const SIGALG_LOOKUP *selected_pq = NULL;
-    EVP_PKEY *classic_pkey, *pq_pkey;
-    
-    /* Get available signature algorithms */
-    classic_sigslen = tls12_get_psigalgs(s, 0, &classic_sigs);
-    (void)tls12_get_pq_sigalgs(s, 0, &pq_sigs); /* Get PQ sigalgs but not used in this function */
-    
-    /* Get certificate keys */
-    classic_pkey = s->s3.tmp.cert->privatekey;
-    pq_pkey = s->cert->pqkey ? s->cert->pqkey->privatekey : NULL;
-    
-    /* Select classic signature algorithm */
-    if (classic_pkey != NULL) {
-        selected_classic = tls1_select_enhanced_classic_sigalg(s, classic_pkey, 
-                                                              classic_sigs, classic_sigslen);
-        if (selected_classic == NULL) {
-            return 0;
-        }
-    } else {
-        return 0;
-    }
-    
-    /* Select PQ signature algorithm */
-    if (pq_pkey != NULL && SSL_CONNECTION_HYBRID_NEGOTIATED(s)) {
-        selected_pq = tls1_select_enhanced_pq_sigalg(s, pq_pkey,
-                                                     s->s3.tmp.peer_sigalgs,
-                                                     s->s3.tmp.peer_sigalgslen);
-        if (selected_pq == NULL) {
-            *classic_lu = selected_classic;
-            *pq_lu = NULL;
-            return 1;
-        }
-    } else {
-        *classic_lu = selected_classic;
-        *pq_lu = NULL;
-        return 1;
-    }
-    
-
-    
-    *classic_lu = selected_classic;
-    *pq_lu = selected_pq;
-    
-    return 1;
-}
-
-/* Enhanced classic signature algorithm selection */
-static const SIGALG_LOOKUP *tls1_select_enhanced_classic_sigalg(SSL_CONNECTION *s,
-                                                                 const EVP_PKEY *classic_pkey,
-                                                                 const uint16_t *peer_classic_sigs,
-                                                                 size_t peer_classic_sigslen)
-{
-    const uint16_t *local_classic_sigs;
-    size_t local_classic_sigslen, i, j;
-    const SIGALG_LOOKUP *lu = NULL;
-    /* Get local classical signature algorithms */
-    local_classic_sigslen = tls12_get_psigalgs(s, 0, &local_classic_sigs);
-    
-    
-    /* Server preference: check local algorithms first, then peer algorithms */
-    if (s->server) {
-        for (i = 0; i < local_classic_sigslen; i++) {
-            lu = tls1_lookup_sigalg(s, local_classic_sigs[i]);
-            if (lu == NULL)
-                continue;
-                
-            /* Check if peer supports this algorithm */
-            for (j = 0; j < peer_classic_sigslen; j++) {
-                if (local_classic_sigs[i] == peer_classic_sigs[j]) {
-                    /* Check compatibility with classical certificate */
-                    return lu;
-                }
-            }
-        }
-    } else {
-        /* Client preference: check peer algorithms first, then local algorithms */
-        for (i = 0; i < peer_classic_sigslen; i++) {
-            lu = tls1_lookup_sigalg(s, peer_classic_sigs[i]);
-            if (lu == NULL)
-                continue;
-                
-            /* Check if we support this algorithm */
-            for (j = 0; j < local_classic_sigslen; j++) {
-                if (peer_classic_sigs[i] == local_classic_sigs[j]) {
-                    /* Check compatibility with classical certificate */
-                    return lu;
-                }
-            }
-        }
-    }
-    
-
-    return NULL;
-}
 
 
 /* Enhanced PQC key type detection */

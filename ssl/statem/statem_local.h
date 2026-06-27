@@ -319,9 +319,6 @@ int tls_parse_ctos_sig_algs_cert(SSL_CONNECTION *s, PACKET *pkt,
 EXT_RETURN tls_construct_ctos_sig_algs(SSL_CONNECTION *s, WPACKET *pkt,
                                        unsigned int context, X509 *x,
                                        size_t chainidx);
-EXT_RETURN tls_construct_ctos_dual_sig_algs(SSL_CONNECTION *s, WPACKET *pkt,
-                                            unsigned int context, X509 *x,
-                                            size_t chainidx);
 #ifndef OPENSSL_NO_OCSP
 int tls_parse_ctos_status_request(SSL_CONNECTION *s, PACKET *pkt,
                                   unsigned int context,
@@ -451,9 +448,6 @@ EXT_RETURN tls_construct_ctos_session_ticket(SSL_CONNECTION *s, WPACKET *pkt,
 EXT_RETURN tls_construct_ctos_sig_algs(SSL_CONNECTION *s, WPACKET *pkt,
                                        unsigned int context, X509 *x,
                                        size_t chainidx);
-EXT_RETURN tls_construct_ctos_dual_sig_algs(SSL_CONNECTION *s, WPACKET *pkt,
-                                            unsigned int context, X509 *x,
-                                            size_t chainidx);
 #ifndef OPENSSL_NO_OCSP
 EXT_RETURN tls_construct_ctos_status_request(SSL_CONNECTION *s, WPACKET *pkt,
                                              unsigned int context, X509 *x,
@@ -590,8 +584,6 @@ int tls_parse_stoc_server_cert_type(SSL_CONNECTION *s, PACKET *pkt,
 
 int tls_parse_ctos_sig_algs(SSL_CONNECTION *s, PACKET *pkt,
                             unsigned int context, X509 *x, size_t chainidx);
-int tls_parse_ctos_dual_sig_algs(SSL_CONNECTION *s, PACKET *pkt,
-                                 unsigned int context, X509 *x, size_t chainidx);
 #ifndef OPENSSL_NO_OCSP
 int tls_parse_ctos_status_request(SSL_CONNECTION *s, PACKET *pkt,
                                   unsigned int context,
@@ -600,20 +592,7 @@ int tls_parse_ctos_status_request(SSL_CONNECTION *s, PACKET *pkt,
 
 int tls_parse_stoc_psk(SSL_CONNECTION *s, PACKET *pkt, unsigned int context,
                        X509 *x, size_t chainidx);
-int tls_parse_stoc_dual_sig_algs(SSL_CONNECTION *s, PACKET *pkt,
-                                 unsigned int context, X509 *x, size_t chainidx);
 
-/* Dual signature algorithms extension functions */
-EXT_RETURN tls_construct_ctos_dual_sig_algs(SSL_CONNECTION *s, WPACKET *pkt,
-                                            unsigned int context, X509 *x,
-                                            size_t chainidx);
-EXT_RETURN tls_construct_stoc_dual_sig_algs(SSL_CONNECTION *s, WPACKET *pkt,
-                                            unsigned int context, X509 *x,
-                                            size_t chainidx);
-int tls_parse_ctos_dual_sig_algs(SSL_CONNECTION *s, PACKET *pkt,
-                                 unsigned int context, X509 *x, size_t chainidx);
-int tls_parse_stoc_dual_sig_algs(SSL_CONNECTION *s, PACKET *pkt,
-                                 unsigned int context, X509 *x, size_t chainidx);
 
 /* Hybrid certificate capability flag extension functions */
 EXT_RETURN tls_construct_ctos_hybrid_cert(SSL_CONNECTION *s, WPACKET *pkt,
@@ -627,11 +606,5 @@ int tls_parse_ctos_hybrid_cert(SSL_CONNECTION *s, PACKET *pkt,
 int tls_parse_stoc_hybrid_cert(SSL_CONNECTION *s, PACKET *pkt,
                                unsigned int context, X509 *x, size_t chainidx);
 
-/* Dual signature algorithms validation functions */
-int is_valid_classic_signature_algorithm(uint16_t sigalg);
-int is_valid_pq_signature_algorithm(uint16_t sigalg);
-int check_dual_security_compatibility(uint16_t classic_alg, uint16_t pq_alg);
-int get_dual_classical_sigalgs(SSL_CONNECTION *s, const uint16_t **psigs, size_t *psigslen);
-int get_dual_pq_sigalgs(SSL_CONNECTION *s, const uint16_t **psigs, size_t *psigslen);
 
 int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int depth);

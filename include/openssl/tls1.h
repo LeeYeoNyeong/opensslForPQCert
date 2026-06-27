@@ -160,13 +160,6 @@ extern "C" {
 # define TLSEXT_TYPE_key_share                   51
 # define TLSEXT_TYPE_quic_transport_parameters   57
 /*
- * Transient placement only: dual_signature_algorithms is removed later in
- * Phase 4b. Until then it is parked in the TLS ExtensionType private-use range
- * (65280-65535, RFC 8446) so it cannot collide with an IANA-allocated codepoint
- * such as transparency_info (52, RFC 9162). key_share is restored to 51.
- */
-# define TLSEXT_TYPE_dual_signature_algorithms   0xff50
-/*
  * Hybrid-certificate capability flag (zero-length payload), in the TLS
  * ExtensionType private-use range (65280-65535, RFC 8446). The client
  * advertises it in ClientHello; the server echoes it in EncryptedExtensions
