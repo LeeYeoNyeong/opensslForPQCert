@@ -1,0 +1,12 @@
+# Resource identifiers, private keys and measurement data must never be committed.
+instances.json
+instances.json.terminated
+*.pem
+*.pem.pub
+results/
+smoke.tgz
+
+# Local run logs
+setup_logs/
+sanity_logs/
+run_logs/
