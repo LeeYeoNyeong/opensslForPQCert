@@ -2087,7 +2087,7 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
                                strstr(key_type_name, "sphincssha2128ssimple") != NULL ||
                                strstr(key_type_name, "sphincsshake128fsimple") != NULL ||
                                strstr(key_type_name, "sphincssha2192fsimple") != NULL ||
-                               strstr(key_type_name, "slhdsa") != NULL);
+                               strstr(key_type_name, "sphincs") != NULL);
         }
         
         /* Skip curve validation for PQC algorithms */
@@ -5273,37 +5273,34 @@ else if (strstr(key_type_name, "falconpadded512") != NULL) {
 else if (strstr(key_type_name, "falconpadded1024") != NULL) {
     *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_falcon1024);
 }
-/* SPHINCS algorithms */
-else if (strstr(key_type_name, "sphincssha2128fsimple") != NULL) {
-    *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_sphincs_sha256_128f_simple);
-}
+/* SLH-DSA (FIPS 205, SHA2 family) -- distinct codepoint per variant.
+ * oqs-provider 0.11.0 exposes SLH-DSA under the legacy SPHINCS+ key-type
+ * names (sphincssha2{128,192,256}{s,f}simple), so we match on those and
+ * route each to its own 0x0A0x codepoint. The six sha2 names are mutually
+ * non-substring, so the chain order among them is irrelevant. These take
+ * precedence over the legacy SPHINCS->0x0906/0x0907 mapping (now used only
+ * for the SHAKE variant below), which was the pre-0.11.0 develop behaviour. */
 else if (strstr(key_type_name, "sphincssha2128ssimple") != NULL) {
-    *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_sphincs_sha256_128f_simple);
-}
-else if (strstr(key_type_name, "sphincsshake128fsimple") != NULL) {
-    *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_sphincs_sha256_128f_simple);
-}
-else if (strstr(key_type_name, "sphincssha2192fsimple") != NULL) {
-    *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_sphincs_sha256_192f_simple);
-}
-/* SLH-DSA (FIPS 205, SHA2 family) - distinct codepoint per variant */
-else if (strstr(key_type_name, "slhdsasha2128s") != NULL) {
     *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_slhdsa_sha2_128s);
 }
-else if (strstr(key_type_name, "slhdsasha2128f") != NULL) {
+else if (strstr(key_type_name, "sphincssha2128fsimple") != NULL) {
     *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_slhdsa_sha2_128f);
 }
-else if (strstr(key_type_name, "slhdsasha2192s") != NULL) {
+else if (strstr(key_type_name, "sphincssha2192ssimple") != NULL) {
     *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_slhdsa_sha2_192s);
 }
-else if (strstr(key_type_name, "slhdsasha2192f") != NULL) {
+else if (strstr(key_type_name, "sphincssha2192fsimple") != NULL) {
     *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_slhdsa_sha2_192f);
 }
-else if (strstr(key_type_name, "slhdsasha2256s") != NULL) {
+else if (strstr(key_type_name, "sphincssha2256ssimple") != NULL) {
     *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_slhdsa_sha2_256s);
 }
-else if (strstr(key_type_name, "slhdsasha2256f") != NULL) {
+else if (strstr(key_type_name, "sphincssha2256fsimple") != NULL) {
     *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_slhdsa_sha2_256f);
+}
+/* SPHINCS-SHAKE (not a measurement target; preserve legacy mapping) */
+else if (strstr(key_type_name, "sphincsshake128fsimple") != NULL) {
+    *sigalg = tls1_lookup_pq_sigalg(s, TLSEXT_SIGALG_sphincs_sha256_128f_simple);
 }
 else {
 /* Fallback to default PQC algorithm */

@@ -57,9 +57,9 @@ static int have_oqs = 0;
 static const char *const ALGS[] = {
     "mldsa44", "mldsa65", "mldsa87",
     "falcon512", "falcon1024",
-    "slhdsasha2128s", "slhdsasha2128f",
-    "slhdsasha2192s", "slhdsasha2192f",
-    "slhdsasha2256s", "slhdsasha2256f",
+    "sphincssha2128ssimple", "sphincssha2128fsimple",
+    "sphincssha2192ssimple", "sphincssha2192fsimple",
+    "sphincssha2256ssimple", "sphincssha2256fsimple",
 };
 #define NALG ((int)OSSL_NELEM(ALGS))
 

@@ -51,8 +51,8 @@ export OPENSSL_MODULES=${OPENSSL_MODULES:-/usr/local/lib/ossl-modules}
 
 FORMATS=${FORMATS:-"dual catalyst chameleon related pure traditional"}
 ALGS=${ALGS:-"mldsa44 mldsa65 mldsa87 falcon512 falcon1024 \
-slhdsasha2128s slhdsasha2128f slhdsasha2192s slhdsasha2192f \
-slhdsasha2256s slhdsasha2256f"}
+sphincssha2128ssimple sphincssha2128fsimple sphincssha2192ssimple sphincssha2192fsimple \
+sphincssha2256ssimple sphincssha2256fsimple"}
 LOSSES=${LOSSES:-"0 5 10"}
 BWS=${BWS:-"0 1 5 10"}
 
@@ -60,9 +60,9 @@ BWS=${BWS:-"0 1 5 10"}
 cat_level() {
     case "$1" in
         mldsa44)              echo "Cat2" ;;      # FIPS-204 Cat2, paired to P-256
-        falcon512|slhdsasha2128s|slhdsasha2128f) echo "Cat1" ;;
-        mldsa65|slhdsasha2192s|slhdsasha2192f)   echo "Cat3" ;;
-        mldsa87|falcon1024|slhdsasha2256s|slhdsasha2256f) echo "Cat5" ;;
+        falcon512|sphincssha2128ssimple|sphincssha2128fsimple) echo "Cat1" ;;
+        mldsa65|sphincssha2192ssimple|sphincssha2192fsimple)   echo "Cat3" ;;
+        mldsa87|falcon1024|sphincssha2256ssimple|sphincssha2256fsimple) echo "Cat5" ;;
         p256) echo "Cat1" ;; p384) echo "Cat3" ;; p521) echo "Cat5" ;;
         *) echo "-" ;;
     esac

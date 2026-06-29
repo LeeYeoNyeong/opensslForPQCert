@@ -44,7 +44,7 @@ SUBJ_CA_P="/O=PQTest/CN=Test PQC CA"
 SUBJ_SRV="/O=PQTest/CN=server.example.com"
 SUBJ_CLI="/O=PQTest/CN=client.example.com"
 
-ALGS=${ALGS:-"mldsa44 mldsa65 mldsa87 falcon512 falcon1024 slhdsasha2128s slhdsasha2128f slhdsasha2192s slhdsasha2192f slhdsasha2256s slhdsasha2256f"}
+ALGS=${ALGS:-"mldsa44 mldsa65 mldsa87 falcon512 falcon1024 sphincssha2128ssimple sphincssha2128fsimple sphincssha2192ssimple sphincssha2192fsimple sphincssha2256ssimple sphincssha2256fsimple"}
 
 # --- Shared classical assets -------------------------------------------------
 $OSSL genpkey $PROV -algorithm RSA -out ca_rsa_key.pem
