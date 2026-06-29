@@ -21,6 +21,7 @@
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/v3_certbind.h>
+#include <openssl/v3_dcd.h>
 #include "internal/refcount.h"
 #include "ssl_local.h"
 #include "ssl_cert_table.h"
@@ -92,6 +93,7 @@ CERT *ssl_cert_new(size_t ssl_pkey_num)
     ret->hybrid_cert_enabled = 0;
     ret->hybrid_cert_required = 0;
     ret->alt_privatekey = NULL;
+    ret->delta_privatekey = NULL;
 
     if (!CRYPTO_NEW_REF(&ret->references, 1)) {
         OPENSSL_free(ret->pkeys);
@@ -282,6 +284,11 @@ CERT *ssl_cert_dup(CERT *cert)
         EVP_PKEY_up_ref(ret->alt_privatekey);
     }
 
+    if (cert->delta_privatekey != NULL) {
+        ret->delta_privatekey = cert->delta_privatekey;
+        EVP_PKEY_up_ref(ret->delta_privatekey);
+    }
+
     return ret;
 
  err:
@@ -334,6 +341,8 @@ void ssl_cert_clear_certs(CERT *c)
     }
     EVP_PKEY_free(c->alt_privatekey);
     c->alt_privatekey = NULL;
+    EVP_PKEY_free(c->delta_privatekey);
+    c->delta_privatekey = NULL;
     ssl_cert_clear_pq_chain(c);
 }
 
@@ -749,6 +758,94 @@ int ssl_cert_set_catalyst_alt_key(CERT *c, X509 *cert, EVP_PKEY *altkey)
     }
     EVP_PKEY_free(c->alt_privatekey);
     c->alt_privatekey = altkey;
+
+    return 1;
+}
+
+/*
+ * Chameleon analogue of ssl_cert_catalyst_altkey_matches(): confirm |deltakey|
+ * is the private key of the Delta certificate that |cert| (a Chameleon Base
+ * certificate) describes in its deltaCertificateDescriptor extension. We
+ * reconstruct the Delta from the Base + DCD exactly as the verifying peer does
+ * (tls_process_pq_certificate_verify / ssl_verify_chameleon_dcd) and compare its
+ * public key against |deltakey|, so a loaded key that does not match THIS
+ * certificate's reconstructed Delta is refused -- the signature would otherwise
+ * be unverifiable by the peer. The reconstruction is one-shot here (key load and
+ * the per-handshake negotiation/sign checks), never on the bulk data path.
+ */
+int ssl_cert_chameleon_deltakey_matches(X509 *cert, EVP_PKEY *deltakey)
+{
+    DeltaCertificateDescriptor *dcd;
+    X509 *delta;
+    EVP_PKEY *deltapub;
+    int rv = 0;
+
+    if (cert == NULL || deltakey == NULL)
+        return 0;
+    if (X509_get_ext_by_NID(cert, NID_id_ce_deltaCertificateDescriptor, -1) < 0)
+        return 0;
+    dcd = X509_get_ext_d2i(cert, NID_id_ce_deltaCertificateDescriptor,
+                           NULL, NULL);
+    if (dcd == NULL)
+        return 0;
+    delta = reconstruct_delta(cert, dcd);
+    DeltaCertificateDescriptor_free(dcd);
+    if (delta == NULL)
+        return 0;
+    deltapub = X509_get0_pubkey(delta); /* borrowed from delta */
+    rv = (deltapub != NULL && EVP_PKEY_eq(deltapub, deltakey) == 1);
+    X509_free(delta);
+    return rv;
+}
+
+/*
+ * Load the Chameleon Delta (PQC) private key. Like the Catalyst loader this
+ * installs no second certificate: the Delta's PQC public key is reconstructed
+ * by the peer from the main (Base) certificate's deltaCertificateDescriptor
+ * extension. The private key is validated against THAT reconstructed Delta key
+ * (not the Base's main key), so it can never silently install an unrelated key.
+ * It is consumed only when producing the PQCertificateVerify proof-of-possession
+ * on the server side.
+ */
+int ssl_cert_set_chameleon_delta_key(CERT *c, X509 *cert, EVP_PKEY *deltakey)
+{
+    if (c == NULL || cert == NULL || deltakey == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+
+    if (!c->hybrid_cert_enabled) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_DUAL_CERTS_NOT_ENABLED);
+        return 0;
+    }
+
+    /*
+     * The certificate must carry the deltaCertificateDescriptor from which the
+     * Delta (and thus its public key) is reconstructed. Without it there is
+     * nothing to bind the loaded private key against.
+     */
+    if (X509_get_ext_by_NID(cert, NID_id_ce_deltaCertificateDescriptor, -1) < 0) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
+        return 0;
+    }
+
+    /*
+     * Enforce keypair coherence against the reconstructed Delta public key: a
+     * private key whose public part does not match the Delta the peer will
+     * rebuild is refused (the Chameleon analogue of X509_check_private_key,
+     * which would test the Base main key and reject the Delta key).
+     */
+    if (!ssl_cert_chameleon_deltakey_matches(cert, deltakey)) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_PRIVATE_KEY_MISMATCH);
+        return 0;
+    }
+
+    if (!EVP_PKEY_up_ref(deltakey)) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_EVP_LIB);
+        return 0;
+    }
+    EVP_PKEY_free(c->delta_privatekey);
+    c->delta_privatekey = deltakey;
 
     return 1;
 }

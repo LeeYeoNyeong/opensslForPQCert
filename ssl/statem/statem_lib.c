@@ -487,6 +487,21 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
          * verifiable by the peer.
          */
         pq_pkey = s->cert->alt_privatekey;
+    } else if (SSL_CONNECTION_HYBRID_NEGOTIATED(s)
+               && s->cert->delta_privatekey != NULL
+               && s->s3.tmp.cert != NULL
+               && ssl_cert_chameleon_deltakey_matches(s->s3.tmp.cert->x509,
+                                                      s->cert->delta_privatekey)) {
+        /*
+         * Chameleon single-certificate hybrid: the PQC public key is carried
+         * implicitly in the selected certificate's deltaCertificateDescriptor
+         * extension (the peer rebuilds the Delta and uses its key). Sign the
+         * PQCertificateVerify with the matching Delta private key. As in the
+         * Catalyst branch we re-confirm the loaded Delta key matches THIS
+         * certificate's reconstructed Delta so the signature is always
+         * verifiable by the peer.
+         */
+        pq_pkey = s->cert->delta_privatekey;
     } else if (s->cert->key != NULL && s->cert->key->privatekey != NULL) {
         /* PQC-only or composite: use main key */
         pq_pkey = s->cert->key->privatekey;

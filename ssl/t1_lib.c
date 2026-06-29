@@ -4161,6 +4161,20 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
              * with keeps negotiation and signing in lockstep.
              */
             pq_priv = s->cert->alt_privatekey;
+        } else if (s->cert->delta_privatekey != NULL
+                   && s->s3.tmp.cert != NULL
+                   && ssl_cert_chameleon_deltakey_matches(s->s3.tmp.cert->x509,
+                                                          s->cert->delta_privatekey)) {
+            /*
+             * Chameleon (single-certificate): the PQ key is the reconstructed
+             * Delta certificate's key, described by the selected certificate's
+             * deltaCertificateDescriptor extension. As with Catalyst we confirm
+             * the loaded Delta private key actually corresponds to THIS
+             * certificate's reconstructed Delta before negotiating hybrid, and
+             * derive the PQ sigalg from the same key tls_construct_pq_cert_verify
+             * signs with, keeping negotiation and signing in lockstep.
+             */
+            pq_priv = s->cert->delta_privatekey;
         }
 
         if (pq_priv != NULL) {

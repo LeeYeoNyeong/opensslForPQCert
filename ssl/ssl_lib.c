@@ -8189,6 +8189,34 @@ int SSL_set_catalyst_alt_key(SSL *s, X509 *cert, EVP_PKEY *altkey)
 }
 
 /*
+ * Load the Chameleon Delta (PQC) private key for single-certificate hybrid
+ * authentication. The main (Base) certificate carrying the
+ * deltaCertificateDescriptor is configured through the normal
+ * SSL_CTX_use_certificate/PrivateKey path; this call only supplies the PQC
+ * private key of the Delta the peer reconstructs from that extension. No second
+ * certificate is installed or transmitted.
+ */
+int SSL_CTX_set_chameleon_delta_key(SSL_CTX *ctx, X509 *cert, EVP_PKEY *deltakey)
+{
+    if (ctx == NULL || ctx->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+    return ssl_cert_set_chameleon_delta_key(ctx->cert, cert, deltakey);
+}
+
+int SSL_set_chameleon_delta_key(SSL *s, X509 *cert, EVP_PKEY *deltakey)
+{
+    SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(s);
+
+    if (sc == NULL || sc->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+    return ssl_cert_set_chameleon_delta_key(sc->cert, cert, deltakey);
+}
+
+/*
  * Détection fiable du type de clé (classique ou PQC)
  * Utilise les NID OpenSSL pour une détection fiable et standard
  */

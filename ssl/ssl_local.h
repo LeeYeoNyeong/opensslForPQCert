@@ -2238,6 +2238,15 @@ typedef struct cert_st {
      * PQCertificateVerify proof-of-possession.
      */
     EVP_PKEY *alt_privatekey;
+    /*
+     * Chameleon single-certificate hybrid: the PQC private key of the Delta
+     * certificate reconstructed from the main (Base) certificate's
+     * deltaCertificateDescriptor extension. Like alt_privatekey it never causes
+     * a second certificate to be transmitted; it is only used to produce the
+     * PQCertificateVerify proof-of-possession, whose verifying key the peer
+     * recovers by reconstructing the Delta from the Base's DCD.
+     */
+    EVP_PKEY *delta_privatekey;
     CRYPTO_REF_COUNT references;             /* >1 only if SSL_copy_session_id is used */
 } CERT;
 /* Post-quantum signature algorithm functions for dual certificate mode */
@@ -2729,6 +2738,8 @@ void ssl_cert_clear_pq_chain(CERT *c);
 __owur int ssl_cert_set_pq_certificate(CERT *c, X509 *cert, EVP_PKEY *key, STACK_OF(X509) *chain);
 __owur int ssl_cert_set_catalyst_alt_key(CERT *c, X509 *cert, EVP_PKEY *altkey);
 __owur int ssl_cert_catalyst_altkey_matches(X509 *cert, EVP_PKEY *altkey);
+__owur int ssl_cert_set_chameleon_delta_key(CERT *c, X509 *cert, EVP_PKEY *deltakey);
+__owur int ssl_cert_chameleon_deltakey_matches(X509 *cert, EVP_PKEY *deltakey);
 
 __owur int ssl_verify_cert_chain(SSL_CONNECTION *s, STACK_OF(X509) *sk);
 __owur int ssl_verify_rpk(SSL_CONNECTION *s, EVP_PKEY *rpk);

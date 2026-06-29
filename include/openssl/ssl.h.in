@@ -1801,6 +1801,8 @@ __owur int SSL_CTX_enable_dual_certs(SSL_CTX *ctx);
 __owur int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF(X509) *chain);
 __owur int SSL_CTX_set_catalyst_alt_key(SSL_CTX *ctx, X509 *cert, EVP_PKEY *altkey);
 __owur int SSL_set_catalyst_alt_key(SSL *s, X509 *cert, EVP_PKEY *altkey);
+__owur int SSL_CTX_set_chameleon_delta_key(SSL_CTX *ctx, X509 *cert, EVP_PKEY *deltakey);
+__owur int SSL_set_chameleon_delta_key(SSL *s, X509 *cert, EVP_PKEY *deltakey);
 __owur int SSL_CTX_set_hybrid_cert_required(SSL_CTX *ctx, int required);
 __owur int SSL_set_hybrid_cert_required(SSL *s, int required);
 
