@@ -2302,65 +2302,77 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
     EVP_PKEY_free(s->session->peer_rpk);
     s->session->peer_rpk = NULL;
 
-    /* Optionally check for RelatedCertificate extension in PQC certificates if dual certs are enabled.
-     * 
-     * NOTE: This is a secondary, non-fatal validation. Primary validation occurs
-     * in parse_related_certificate_cb() during TLS extension parsing, which is
-     * strict and will fail the handshake if the extension is present but invalid.
-     * 
-     * This check here is informational and does not interrupt the handshake.
+    /*
+     * Enforce the RFC 9763 RelatedCertificate hash binding for the Related
+     * (multi-certificate) hybrid format. A Related PQC certificate carries a
+     * RelatedCertificate extension whose hashValue is the digest of the
+     * classical certificate it is bound to. We recompute that digest over the
+     * classical leaf actually received and require it to match; a mismatch (or
+     * any inability to verify a present binding) aborts the handshake.
+     *
+     * Gate: the check fires only when the PQC leaf certificate actually
+     * carries a RelatedCertificate extension. RFC 9763 binds two end-entity
+     * certificates, so enforcement is scoped to the leaf-to-leaf pair (PQC
+     * leaf against the received classical leaf); intermediates are not
+     * inspected, which avoids falsely rejecting a chain that carries
+     * RelatedCertificate extensions on CA certificates. Dual (no extension),
+     * Catalyst/Chameleon (single certificate, no peer_pqc_chain) and Composite
+     * are therefore unaffected -- the extension's presence is the Related
+     * signal. This is fail-closed: once a binding is present, it MUST verify.
+     *
+     * NOTE (asymmetry, reported gap): this enforces the server->client
+     * direction only. The server side does not parse a client-presented PQC /
+     * dual certificate chain into peer_pqc_chain (statem_srvr.c has no such
+     * reception), so client-presented Related bindings cannot be enforced
+     * until that reception path is implemented -- tracked separately.
      */
-    if (s->session->dual_certs_enabled && s->session->peer_pqc_chain) {
-        int pqc_chain_len = sk_X509_num(s->session->peer_pqc_chain);
-        
-        for (int i = 0; i < pqc_chain_len; i++) {
-            X509 *pqc_cert = sk_X509_value(s->session->peer_pqc_chain, i);
-            
-            RELATED_CERTIFICATE *rc = get_related_certificate_extension(pqc_cert);
-            if (!rc) {
-                continue;
-            }
-            
-            /* Get the hash algorithm from the extension */
+    if (s->session->dual_certs_enabled && s->session->peer_pqc_chain != NULL
+            && sk_X509_num(s->session->peer_pqc_chain) > 0) {
+        X509 *pqc_leaf = sk_X509_value(s->session->peer_pqc_chain, 0);
+        RELATED_CERTIFICATE *rc = get_related_certificate_extension(pqc_leaf);
+
+        /* rc == NULL: no RelatedCertificate extension -> not Related, skip. */
+        if (rc != NULL) {
             const EVP_MD *md = EVP_get_digestbyobj(rc->hashAlgorithm->algorithm);
-            if (!md) {
-                RELATED_CERTIFICATE_free(rc);
-                continue;
-            }
-            
-            /* Serialize the classical certificate */
             unsigned char *der = NULL;
-            int derlen = i2d_X509(x, &der);
-            if (derlen <= 0) {
-                RELATED_CERTIFICATE_free(rc);
-                continue;
-            }
-            
-            /* Calculate hash of the classical certificate */
+            int derlen;
             unsigned char hash[EVP_MAX_MD_SIZE];
             unsigned int hashlen = 0;
+
+            /* Present but unverifiable binding -> fail closed. */
+            if (md == NULL) {
+                RELATED_CERTIFICATE_free(rc);
+                SSLfatal(s, SSL_AD_BAD_CERTIFICATE,
+                         SSL_R_INVALID_RELATED_CERTIFICATE);
+                return WORK_ERROR;
+            }
+
+            /* Hash the classical leaf actually received. */
+            derlen = i2d_X509(x, &der);
+            if (derlen <= 0) {
+                RELATED_CERTIFICATE_free(rc);
+                SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_X509_LIB);
+                return WORK_ERROR;
+            }
+
             if (!EVP_Digest(der, derlen, hash, &hashlen, md, NULL)) {
                 OPENSSL_free(der);
                 RELATED_CERTIFICATE_free(rc);
-                continue;
+                SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+                return WORK_ERROR;
             }
-            
+
             OPENSSL_free(der);
-            
-            /* Compare the calculated hash with the hash in the extension.
-             * Note: This is a non-fatal check - we continue even if validation fails.
-             * Strict validation is performed in parse_related_certificate_cb().
-             */
-            if (hashlen != (unsigned int)rc->hashValue->length) {
+
+            /* The binding MUST match the received classical leaf. */
+            if (hashlen != (unsigned int)rc->hashValue->length
+                    || memcmp(hash, rc->hashValue->data, hashlen) != 0) {
                 RELATED_CERTIFICATE_free(rc);
-                continue;
+                SSLfatal(s, SSL_AD_BAD_CERTIFICATE,
+                         SSL_R_RELATED_CERTIFICATE_HASH_MISMATCH);
+                return WORK_ERROR;
             }
-            
-            if (memcmp(hash, rc->hashValue->data, hashlen) != 0) {
-                RELATED_CERTIFICATE_free(rc);
-                continue;
-            }
-            
+
             RELATED_CERTIFICATE_free(rc);
         }
     }

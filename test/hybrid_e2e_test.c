@@ -1011,28 +1011,20 @@ static int test_related_happy_path(void)
 }
 
 /*
- * Test 10: Related binding enforcement -- DOCUMENTS A KNOWN, REPORTED GAP.
+ * Test 10: Related binding enforcement (Phase 4f).
  *
  * The PQC certificate's RelatedCertificate extension binds to the WRONG
  * certificate, so its hash does NOT match the classical leaf actually
- * transmitted. RFC 9763 intends this mismatch to be rejected, which would abort
- * the handshake. It does NOT: this build computes the binding but never enforces
- * it, by code inspection on two independent paths --
- *   1. parse_related_certificate_cb (the SSL_EXT_TLS1_3_CERTIFICATE custom
- *      extension) never fires on the PQC certificate, which is transmitted in a
- *      separate chain (peer_pqc_chain), not as chainidx==1 of the standard
- *      Certificate message it was written for; and
- *   2. the direct hash check in statem_clnt.c (tls_process_server_certificate,
- *      the peer_pqc_chain loop) is deliberately non-fatal -- it `continue`s on a
- *      hash mismatch and never raises an error.
- * So the Related (RFC 9763) certificate binding is currently INERT: the PoP is
- * the same working chained PQCertificateVerify as Dual, but the hash binding
- * that distinguishes Related is not enforced end-to-end. This test pins that
- * reality (the handshake COMPLETES despite a tampered binding) so the suite is
- * honest and green; if binding enforcement is ever wired up, this test will fail
- * and point a future change here. It asserts a gap, not desired behavior.
+ * transmitted. RFC 9763 requires this mismatch to be rejected. The client now
+ * recomputes the binding over the received classical leaf in
+ * tls_post_process_server_certificate (the peer_pqc_chain loop) and aborts the
+ * handshake fail-closed (SSL_AD_BAD_CERTIFICATE /
+ * SSL_R_RELATED_CERTIFICATE_HASH_MISMATCH) when it does not match.
+ *
+ * This is the trip-wire that Phase 4e left documenting the gap; it is now the
+ * positive enforcement assertion. A tampered binding MUST fail the handshake.
  */
-static int test_related_binding_known_gap(void)
+static int test_related_binding_enforced(void)
 {
     SSL_CTX *sctx = NULL, *cctx = NULL;
     handshake_obs obs;
@@ -1043,11 +1035,8 @@ static int test_related_binding_known_gap(void)
     if (!build_related_pair(&sctx, &cctx, 1))
         goto end;
     completed = connect_observed(sctx, cctx, &obs, NULL, NULL, 0, 0);
-    TEST_info("KNOWN GAP: RFC 9763 RelatedCertificate hash binding is NOT "
-              "enforced end-to-end; a mismatched binding does not abort the "
-              "handshake (PoP is Dual-equivalent). See test comment.");
-    /* Current, reported behavior: the tampered binding is NOT rejected. */
-    if (!TEST_true(completed))
+    /* The tampered RFC 9763 binding MUST abort the handshake. */
+    if (!TEST_false(completed))
         goto end;
     ok = 1;
  end:
@@ -1076,7 +1065,7 @@ int setup_tests(void)
     ADD_TEST(test_catalyst_happy_path);
     ADD_TEST(test_chameleon_happy_path);
     ADD_TEST(test_related_happy_path);
-    ADD_TEST(test_related_binding_known_gap);
+    ADD_TEST(test_related_binding_enforced);
     return 1;
 }
 

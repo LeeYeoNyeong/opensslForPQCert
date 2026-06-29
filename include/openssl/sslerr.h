@@ -381,4 +381,10 @@
 # define SSL_R_NO_PQC_ALGORITHMS_AVAILABLE                1123
 # define SSL_R_HYBRID_CERT_DOWNGRADE                      1124
 
+/* RFC 9763 Related Certificate error codes (numbers reserved in openssl.txt) */
+# define SSL_R_INVALID_RELATED_CERTIFICATE                420
+# define SSL_R_CANNOT_FETCH_RELATED_CERTIFICATE           421
+# define SSL_R_RELATED_CERTIFICATE_HASH_MISMATCH          422
+# define SSL_R_RELATED_CERTIFICATE_CHAIN_VERIFY_FAILED    423
+
 #endif
