@@ -8257,7 +8257,8 @@ KEY_TYPE get_key_type_from_evp_pkey(const EVP_PKEY *pkey) {
                         result = KEY_TYPE_FALCON;
                     } else if (strstr(key_type_name, "mldsa") != NULL || strstr(key_type_name, "MLDSA") != NULL) {
                         result = KEY_TYPE_MLDSA;
-                    } else if (strstr(key_type_name, "sphincs") != NULL || strstr(key_type_name, "SPHINCS") != NULL) {
+                    } else if (strstr(key_type_name, "sphincs") != NULL || strstr(key_type_name, "SPHINCS") != NULL
+                               || strstr(key_type_name, "slhdsa") != NULL || strstr(key_type_name, "SLHDSA") != NULL) {
                         result = KEY_TYPE_SPHINCS;
                     } else {
                         /* Size-based detection as fallback */

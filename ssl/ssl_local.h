@@ -2364,6 +2364,19 @@ typedef enum downgrade_en {
 #define TLSEXT_SIGALG_mldsa_65                                  0x090A
 #define TLSEXT_SIGALG_mldsa_87                                  0x090B
 
+/*
+ * SLH-DSA (FIPS 205, SHA2 family) pure-PQ signature schemes.
+ * Placed in a dedicated 0x0A0x block so they never collide with the composite
+ * range (0x090C-0x09FF). All pure-PQ codepoint gates that recognise the
+ * falcon512..mldsa_87 block are extended to also cover this range.
+ */
+#define TLSEXT_SIGALG_slhdsa_sha2_128s                          0x0A00
+#define TLSEXT_SIGALG_slhdsa_sha2_128f                          0x0A01
+#define TLSEXT_SIGALG_slhdsa_sha2_192s                          0x0A02
+#define TLSEXT_SIGALG_slhdsa_sha2_192f                          0x0A03
+#define TLSEXT_SIGALG_slhdsa_sha2_256s                          0x0A04
+#define TLSEXT_SIGALG_slhdsa_sha2_256f                          0x0A05
+
 /* Composite signature algorithms */
 #define TLSEXT_SIGALG_mldsa44_p256                              0x090C
 #define TLSEXT_SIGALG_mldsa44_rsa                               0x090D
@@ -3316,7 +3329,13 @@ long ossl_ctrl_internal(SSL *s, int cmd, long larg, void *parg, int no_quic);
 # define SSL_PKEY_PQ_SPHINCS_128F       15
 # define SSL_PKEY_PQ_SPHINCS_192F       16
 # define SSL_PKEY_PQ_SPHINCS_256F       17
-# define SSL_PKEY_PQ_NUM                18
+# define SSL_PKEY_PQ_SLH_DSA_128S       18
+# define SSL_PKEY_PQ_SLH_DSA_128F       19
+# define SSL_PKEY_PQ_SLH_DSA_192S       20
+# define SSL_PKEY_PQ_SLH_DSA_192F       21
+# define SSL_PKEY_PQ_SLH_DSA_256S       22
+# define SSL_PKEY_PQ_SLH_DSA_256F       23
+# define SSL_PKEY_PQ_NUM                24
 
 typedef enum {
     KEY_TYPE_UNKNOWN = 0,

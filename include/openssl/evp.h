@@ -91,6 +91,13 @@
 # define EVP_PKEY_MLDSA_44       1009
 # define EVP_PKEY_MLDSA_65       1010
 # define EVP_PKEY_MLDSA_87       1011
+/* SLH-DSA (FIPS 205, SHA2 family) - distinct from the legacy SPHINCS+ ids above */
+# define EVP_PKEY_SLH_DSA_SHA2_128S  1012
+# define EVP_PKEY_SLH_DSA_SHA2_128F  1013
+# define EVP_PKEY_SLH_DSA_SHA2_192S  1014
+# define EVP_PKEY_SLH_DSA_SHA2_192F  1015
+# define EVP_PKEY_SLH_DSA_SHA2_256S  1016
+# define EVP_PKEY_SLH_DSA_SHA2_256F  1017
 /* Special indicator that the object is uniquely provider side */
 # define EVP_PKEY_KEYMGMT -1
 
