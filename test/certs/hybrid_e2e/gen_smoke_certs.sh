@@ -98,4 +98,27 @@ EOF
     rm -f "catalyst_${alg}_req.pem" "catalyst_${alg}.ext" "catalyst_${alg}_alt_pub.pem"
 done
 
-echo "Generated smoke cert assets in $OUT for: $ALGS"
+# --- Traditional ECDSA baseline (security-level paired control) --------------
+# P-256 (Cat1), P-384 (Cat3), P-521 (Cat5).  Used by the measurement binary's
+# "traditional" format as the classical-only baseline.
+gen_ecdsa() { # $1=tag $2=curve
+    tag=$1; curve=$2
+    $OSSL genpkey $PROV -algorithm EC -pkeyopt "ec_paramgen_curve:$curve" \
+        -out "ca_ecdsa_${tag}_key.pem"
+    $OSSL req -new -x509 $PROV -key "ca_ecdsa_${tag}_key.pem" \
+        -out "ca_ecdsa_${tag}.pem" -days 3650 -subj "$SUBJ_CA_C"
+    $OSSL genpkey $PROV -algorithm EC -pkeyopt "ec_paramgen_curve:$curve" \
+        -out "ecdsa_${tag}_key.pem"
+    $OSSL req -new $PROV -key "ecdsa_${tag}_key.pem" \
+        -out "ecdsa_${tag}_req.pem" -subj "$SUBJ_SRV"
+    $OSSL x509 -req $PROV -in "ecdsa_${tag}_req.pem" \
+        -CA "ca_ecdsa_${tag}.pem" -CAkey "ca_ecdsa_${tag}_key.pem" \
+        -CAcreateserial -out "ecdsa_${tag}_cert.pem" -days 3650
+    rm -f "ecdsa_${tag}_req.pem"
+}
+
+gen_ecdsa p256 P-256
+gen_ecdsa p384 P-384
+gen_ecdsa p521 P-521
+
+echo "Generated smoke cert assets in $OUT for: $ALGS (+ ECDSA p256/p384/p521)"
