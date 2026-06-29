@@ -38,6 +38,7 @@
 # include "internal/time.h"
 # include "internal/ssl.h"
 # include "record/record.h"
+# include "hybrid_measure.h"
 
 # ifdef OPENSSL_BUILD_SHLIBSSL
 #  undef OPENSSL_EXTERN
@@ -1897,6 +1898,15 @@ struct ssl_connection_st {
     uint16_t *dual_client_sigalgs;
     /* Size of above array */
     size_t dual_client_sigalgslen;
+#ifdef HYBRID_MEASURE
+    /*
+     * Handshake-internal crypto timing (nanoseconds), compiled in only for the
+     * dedicated measurement build.  Populated by the instrumented EVP_DigestSign
+     * / EVP_DigestVerify regions in tls_construct/process_{,pq_}cert_verify and
+     * read back by the measurement binary after the handshake completes.
+     */
+    OSSL_HYBRID_MEASURE hybrid_measure;
+#endif
 };
 
 # define SSL_CONNECTION_FROM_SSL_ONLY_int(ssl, c) \

@@ -399,6 +399,9 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             goto err;
         }
     } else {
+#ifdef HYBRID_MEASURE
+        HYBRID_MEASURE_START(_hm0);
+#endif
         /*
          * Here we *must* use EVP_DigestSign() because Ed25519/Ed448 does not
          * support streaming via EVP_DigestSignUpdate/EVP_DigestSignFinal
@@ -413,6 +416,9 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
             goto err;
         }
+#ifdef HYBRID_MEASURE
+        HYBRID_MEASURE_ACCUM(s->hybrid_measure.classical_sign_ns, _hm0);
+#endif
     }
 
 #ifndef OPENSSL_NO_GOST
@@ -563,6 +569,10 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         goto end;
     }
 
+#ifdef HYBRID_MEASURE
+    {
+    HYBRID_MEASURE_START(_hm0);
+#endif
     if (EVP_DigestSignUpdate(pq_mctx, hdata, hdatalen) <= 0) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
@@ -586,6 +596,10 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
+#ifdef HYBRID_MEASURE
+    HYBRID_MEASURE_ACCUM(s->hybrid_measure.pq_sign_ns, _hm0);
+    }
+#endif
 
     /* Write signature to packet */
     if (!WPACKET_sub_memcpy_u16(pkt, pq_sig, pq_siglen)) {
@@ -740,7 +754,13 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
         goto err;
     }
     } else {
+#ifdef HYBRID_MEASURE
+        HYBRID_MEASURE_START(_hm0);
+#endif
         j = EVP_DigestVerify(mctx, data, len, hdata, hdatalen);
+#ifdef HYBRID_MEASURE
+        HYBRID_MEASURE_ACCUM(s->hybrid_measure.classical_verify_ns, _hm0);
+#endif
 #ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
         /* Ignore bad signatures when fuzzing */
         if (SSL_IS_QUIC_HANDSHAKE(s))
@@ -1026,10 +1046,25 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
     }
 
     /* For PQ algorithms, use EVP_DigestVerify instead of streaming approach */
+#ifdef HYBRID_MEASURE
+    {
+    int _hmrc;
+    HYBRID_MEASURE_START(_hm0);
+
+    _hmrc = EVP_DigestVerify(pq_mctx, (unsigned char *)pq_sig, pq_siglen,
+                             hdata, hdatalen);
+    HYBRID_MEASURE_ACCUM(s->hybrid_measure.pq_verify_ns, _hm0);
+    if (_hmrc <= 0) {
+        SSLfatal(s, SSL_AD_BAD_CERTIFICATE, SSL_R_BAD_SIGNATURE);
+        goto end;
+    }
+    }
+#else
     if (EVP_DigestVerify(pq_mctx, (unsigned char *)pq_sig, pq_siglen, hdata, hdatalen) <= 0) {
         SSLfatal(s, SSL_AD_BAD_CERTIFICATE, SSL_R_BAD_SIGNATURE);
         goto end;
     }
+#endif
 
 
     ret = MSG_PROCESS_FINISHED_READING;
