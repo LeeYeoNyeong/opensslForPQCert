@@ -596,4 +596,5 @@ SSL_CTX_set_catalyst_alt_key            596     3_3_0   EXIST::FUNCTION:
 SSL_set_catalyst_alt_key                597     3_3_0   EXIST::FUNCTION:
 SSL_CTX_set_chameleon_delta_key         598     3_3_0   EXIST::FUNCTION:
 SSL_set_chameleon_delta_key             599     3_3_0   EXIST::FUNCTION:
+SSL_CTX_set1_pq_verify_store	600	3_3_0	EXIST::FUNCTION:
 
