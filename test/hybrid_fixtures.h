@@ -38,9 +38,12 @@ typedef enum {
 
 /*
  * Build a configured (server, client) SSL_CTX pair for |fmt|.  For the hybrid
- * and pure formats |pq_alg| selects the per-algorithm fixtures (oqsprovider
- * key-type name, e.g. "mldsa65").  For HF_TRADITIONAL |pq_alg| names the ECDSA
- * curve fixture tag ("p256"/"p384"/"p521").  Returns 1 on success; on failure
+ * and pure formats |pq_alg| is the per-algorithm fixture *label* (e.g.
+ * "mldsa65", "slhdsasha2128f"); it selects the PEM fixtures by name only and is
+ * never passed to a provider.  For SLH-DSA the label differs from the provider
+ * key-type name the fixtures were generated under (sphincssha2*simple).  For
+ * HF_TRADITIONAL |pq_alg| names the ECDSA curve fixture tag
+ * ("p256"/"p384"/"p521").  Returns 1 on success; on failure
  * returns 0 with *sctx,*cctx freed and set to NULL.
  */
 int hf_build_pair(HF_FORMAT fmt, const char *pq_alg, const char *certsdir,

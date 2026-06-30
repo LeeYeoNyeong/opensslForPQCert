@@ -50,16 +50,20 @@ static OSSL_PROVIDER *oqsprov = NULL;
 static int have_oqs = 0;
 
 /*
- * The measurement algorithm set, by oqsprovider key-type name.  These are the
- * exact EVP_PKEY type-name strings (lower-case, no hyphens) that
- * tls1_select_pq_sigalg() and the cert-classification helpers match on.
+ * The measurement algorithm set, as fixture *labels*.  hf_build_pair() uses
+ * these only to locate the per-algorithm PEM fixtures (server_<label>_cert.pem,
+ * ...) produced by gen_smoke_certs.sh; they are not fed to genpkey or to the
+ * negotiation match.  For ML-DSA / Falcon the label equals the oqsprovider
+ * key-type name; for SLH-DSA we keep the FIPS-205 label (slhdsasha2*) while the
+ * fixtures were generated under, and TLS negotiation matches on, the provider
+ * name (sphincssha2*simple, resolved in ssl/t1_lib.c from the key itself).
  */
 static const char *const ALGS[] = {
     "mldsa44", "mldsa65", "mldsa87",
     "falcon512", "falcon1024",
-    "sphincssha2128ssimple", "sphincssha2128fsimple",
-    "sphincssha2192ssimple", "sphincssha2192fsimple",
-    "sphincssha2256ssimple", "sphincssha2256fsimple",
+    "slhdsasha2128s", "slhdsasha2128f",
+    "slhdsasha2192s", "slhdsasha2192f",
+    "slhdsasha2256s", "slhdsasha2256f",
 };
 #define NALG ((int)OSSL_NELEM(ALGS))
 

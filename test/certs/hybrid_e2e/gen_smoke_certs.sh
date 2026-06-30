@@ -44,7 +44,25 @@ SUBJ_CA_P="/O=PQTest/CN=Test PQC CA"
 SUBJ_SRV="/O=PQTest/CN=server.example.com"
 SUBJ_CLI="/O=PQTest/CN=client.example.com"
 
-ALGS=${ALGS:-"mldsa44 mldsa65 mldsa87 falcon512 falcon1024 sphincssha2128ssimple sphincssha2128fsimple sphincssha2192ssimple sphincssha2192fsimple sphincssha2256ssimple sphincssha2256fsimple"}
+# ALGS are *labels* (FIPS-205 SLH-DSA naming for SLH-DSA; identical to the
+# provider name for ML-DSA / Falcon).  Labels are the primary identifier: they
+# name every fixture file (ca_slhdsasha2128f.pem, ...) so the measurement
+# orchestrator and binary can find the assets by label.  Only genpkey and the
+# OID resolution for the Catalyst alt signature need the provider key-type name
+# that oqsprovider 0.11.0 actually exposes -- prov_name() maps label->provider.
+ALGS=${ALGS:-"mldsa44 mldsa65 mldsa87 falcon512 falcon1024 slhdsasha2128s slhdsasha2128f slhdsasha2192s slhdsasha2192f slhdsasha2256s slhdsasha2256f"}
+
+prov_name() { # label -> oqsprovider algorithm name (genpkey / OBJ_txt2obj)
+    case "$1" in
+        slhdsasha2128s) echo sphincssha2128ssimple ;;
+        slhdsasha2128f) echo sphincssha2128fsimple ;;
+        slhdsasha2192s) echo sphincssha2192ssimple ;;
+        slhdsasha2192f) echo sphincssha2192fsimple ;;
+        slhdsasha2256s) echo sphincssha2256ssimple ;;
+        slhdsasha2256f) echo sphincssha2256fsimple ;;
+        *) echo "$1" ;;   # ML-DSA / Falcon: label == provider name
+    esac
+}
 
 # --- Shared classical assets -------------------------------------------------
 $OSSL genpkey $PROV -algorithm RSA -out ca_rsa_key.pem
@@ -63,9 +81,11 @@ $OSSL x509 -req $PROV -in client_rsa_req.pem -CA ca_rsa.pem -CAkey ca_rsa_key.pe
 rm -f client_rsa_req.pem
 
 # --- Per-algorithm assets ----------------------------------------------------
-gen_leaf() { # $1=alg $2=ca_prefix $3=leaf_prefix $4=subj
-    alg=$1; capfx=$2; leaf=$3; subj=$4
-    $OSSL genpkey $PROV -algorithm "$alg" -out "${leaf}_key.pem"
+gen_leaf() { # $1=provider_alg $2=ca_prefix $3=leaf_prefix(label) $4=subj
+    # NB: use distinct names -- /bin/sh has no function-local scope, and reusing
+    # the caller's loop variable "alg" here would clobber it for the next call.
+    palg=$1; capfx=$2; leaf=$3; subj=$4
+    $OSSL genpkey $PROV -algorithm "$palg" -out "${leaf}_key.pem"
     $OSSL req -new $PROV -key "${leaf}_key.pem" -out "${leaf}_req.pem" -subj "$subj"
     $OSSL x509 -req $PROV -in "${leaf}_req.pem" -CA "${capfx}.pem" -CAkey "${capfx}_key.pem" \
         -CAcreateserial -out "${leaf}_cert.pem" -days 3650
@@ -74,22 +94,23 @@ gen_leaf() { # $1=alg $2=ca_prefix $3=leaf_prefix $4=subj
 
 for alg in $ALGS; do
     echo "=== $alg ==="
-    # PQC CA
-    $OSSL genpkey $PROV -algorithm "$alg" -out "ca_${alg}_key.pem"
+    prov=$(prov_name "$alg")   # provider key-type name (genpkey / OID)
+    # PQC CA  (file name = label, genpkey algorithm = provider name)
+    $OSSL genpkey $PROV -algorithm "$prov" -out "ca_${alg}_key.pem"
     $OSSL req -new -x509 $PROV -key "ca_${alg}_key.pem" -out "ca_${alg}.pem" \
         -days 3650 -subj "$SUBJ_CA_P"
     # PQC server + client leaves (issued by the PQC CA)
-    gen_leaf "$alg" "ca_${alg}" "server_${alg}" "$SUBJ_SRV"
-    gen_leaf "$alg" "ca_${alg}" "client_${alg}" "$SUBJ_CLI"
+    gen_leaf "$prov" "ca_${alg}" "server_${alg}" "$SUBJ_SRV"
+    gen_leaf "$prov" "ca_${alg}" "client_${alg}" "$SUBJ_CLI"
 
     # Catalyst: RSA leaf carrying the PQC alt key, self alternative-signed.
-    $OSSL genpkey $PROV -algorithm "$alg" -out "catalyst_${alg}_alt_key.pem"
+    $OSSL genpkey $PROV -algorithm "$prov" -out "catalyst_${alg}_alt_key.pem"
     $OSSL pkey $PROV -in "catalyst_${alg}_alt_key.pem" -pubout -out "catalyst_${alg}_alt_pub.pem"
     $OSSL genpkey $PROV -algorithm RSA -out "catalyst_${alg}_key.pem"
     $OSSL req -new $PROV -key "catalyst_${alg}_key.pem" -out "catalyst_${alg}_req.pem" -subj "$SUBJ_SRV"
     cat > "catalyst_${alg}.ext" <<EOF
 subjectAltPublicKeyInfo = file:catalyst_${alg}_alt_pub.pem
-altSignatureAlgorithm = ${alg}
+altSignatureAlgorithm = ${prov}
 altSignatureValue = file:catalyst_${alg}_alt_key.pem
 EOF
     $OSSL x509 -req $PROV -in "catalyst_${alg}_req.pem" \
