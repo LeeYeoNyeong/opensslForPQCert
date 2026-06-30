@@ -202,4 +202,34 @@ while IFS=$'\t' read -r pair role region id pub priv; do
     ssh_to "$pub" "tar xzf /tmp/smoke.tgz -C $REMOTE_HYBRID"
 done < <(inst_rows)
 
+# --- verify fixtures are byte-identical across every instance ---------------
+# dual/related formats present TWO certs (classical + PQC), so every CA the
+# verifier trusts (ca_rsa.pem and each ca_<label>.pem) must be byte-identical on
+# all hosts.  But the LEAF certs/keys must match too: a stale or partially
+# pushed leaf -- e.g. composite/SLH-DSA missing on one host because gen_smoke
+# silently skipped it before oqsprovider was rebuilt against the fork -- is
+# exactly the skew this gate exists to catch, and ca_*.pem alone would not see
+# it.  We therefore digest *every* PEM under smoke/ (not just ca_*.pem) and also
+# pin the per-host file count, so a host that is merely MISSING a leaf (rather
+# than holding a divergent one) still fails.  Any divergence => abort.
+log "verifying fixtures (CA + leaf certs/keys) are byte-identical across all instances"
+FX_REF=""; FX_REF_NAME=""; FX_REF_N=""
+while IFS=$'\t' read -r pair role region id pub priv; do
+    read -r sum nfiles < <(ssh_to "$pub" "cd $REMOTE_HYBRID/smoke && \
+        n=\$(ls *.pem | wc -l | tr -d ' '); d=\$(md5sum *.pem | sort | md5sum | cut -d' ' -f1); echo \$d \$n") \
+        || die "could not read fixtures on $role/$pair ($pub) -- fixture push failed?"
+    if [ -z "$FX_REF" ]; then
+        FX_REF="$sum"; FX_REF_NAME="$role/$pair"; FX_REF_N="$nfiles"
+    elif [ "$nfiles" != "$FX_REF_N" ]; then
+        # Count first: a host MISSING a leaf (composite/SLH-DSA skew) is the
+        # primary failure mode, and a digest collision must never let a short
+        # inventory through. Cheap, and independent of the digest pipeline.
+        die "fixture count mismatch: $role/$pair has $nfiles PEMs != $FX_REF_NAME has $FX_REF_N; fixtures not uniform (stale/partial push -- composite/SLH-DSA skew?)"
+    elif [ "$sum" != "$FX_REF" ]; then
+        die "fixture mismatch: $role/$pair ($sum, $nfiles files) != $FX_REF_NAME ($FX_REF, $FX_REF_N files); fixtures not uniform (stale/partial push -- composite/SLH-DSA skew?)"
+    fi
+    log "  fixture digest $role/$pair = $sum ($nfiles files)"
+done < <(inst_rows)
+log "fixtures uniform across all instances ($FX_REF, $FX_REF_N files each)"
+
 log "setup complete on all 6 instances. Next: ./sanity.sh"

@@ -44,6 +44,16 @@ SUBJ_CA_P="/O=PQTest/CN=Test PQC CA"
 SUBJ_SRV="/O=PQTest/CN=server.example.com"
 SUBJ_CLI="/O=PQTest/CN=client.example.com"
 
+# Fail loudly if an expected output was not produced.  apps/openssl can return
+# rc=0 even when a provider key type is unavailable (e.g. oqsprovider not yet
+# rebuilt against the fork libcrypto, so SLH-DSA / composite genpkey writes no
+# file), so `set -e` alone does NOT catch a silently-skipped cert.  Every
+# generator below therefore (a) removes its target up front, so a stale file
+# from a previous run cannot mask a failure, and (b) asserts its outputs exist
+# and are non-empty via need().
+die()  { echo "FATAL: gen_smoke_certs.sh: $*" >&2; exit 1; }
+need() { for _f in "$@"; do [ -s "$_f" ] || die "missing/empty output: $OUT/$_f"; done; }
+
 # ALGS are *labels* (FIPS-205 SLH-DSA naming for SLH-DSA; identical to the
 # provider name for ML-DSA / Falcon).  Labels are the primary identifier: they
 # name every fixture file (ca_slhdsasha2128f.pem, ...) so the measurement
@@ -74,48 +84,62 @@ prov_name() { # label -> oqsprovider algorithm name (genpkey / OBJ_txt2obj)
 }
 
 # --- Shared classical assets -------------------------------------------------
+rm -f ca_rsa_key.pem ca_rsa.pem
 $OSSL genpkey $PROV -algorithm RSA -out ca_rsa_key.pem
 $OSSL req -new -x509 $PROV -key ca_rsa_key.pem -out ca_rsa.pem -days 3650 -subj "$SUBJ_CA_C"
+need ca_rsa_key.pem ca_rsa.pem
 
+rm -f server_rsa_key.pem server_rsa_cert.pem
 $OSSL genpkey $PROV -algorithm RSA -out server_rsa_key.pem
 $OSSL req -new $PROV -key server_rsa_key.pem -out server_rsa_req.pem -subj "$SUBJ_SRV"
 $OSSL x509 -req $PROV -in server_rsa_req.pem -CA ca_rsa.pem -CAkey ca_rsa_key.pem \
     -CAcreateserial -out server_rsa_cert.pem -days 3650
 rm -f server_rsa_req.pem
+need server_rsa_key.pem server_rsa_cert.pem
 
+rm -f client_rsa_key.pem client_rsa_cert.pem
 $OSSL genpkey $PROV -algorithm RSA -out client_rsa_key.pem
 $OSSL req -new $PROV -key client_rsa_key.pem -out client_rsa_req.pem -subj "$SUBJ_CLI"
 $OSSL x509 -req $PROV -in client_rsa_req.pem -CA ca_rsa.pem -CAkey ca_rsa_key.pem \
     -CAcreateserial -out client_rsa_cert.pem -days 3650
 rm -f client_rsa_req.pem
+need client_rsa_key.pem client_rsa_cert.pem
 
 # --- Per-algorithm assets ----------------------------------------------------
 gen_leaf() { # $1=provider_alg $2=ca_prefix $3=leaf_prefix(label) $4=subj
     # NB: use distinct names -- /bin/sh has no function-local scope, and reusing
     # the caller's loop variable "alg" here would clobber it for the next call.
     palg=$1; capfx=$2; leaf=$3; subj=$4
+    rm -f "${leaf}_key.pem" "${leaf}_cert.pem" "${leaf}_req.pem"
     $OSSL genpkey $PROV -algorithm "$palg" -out "${leaf}_key.pem"
+    need "${leaf}_key.pem"
     $OSSL req -new $PROV -key "${leaf}_key.pem" -out "${leaf}_req.pem" -subj "$subj"
     $OSSL x509 -req $PROV -in "${leaf}_req.pem" -CA "${capfx}.pem" -CAkey "${capfx}_key.pem" \
         -CAcreateserial -out "${leaf}_cert.pem" -days 3650
     rm -f "${leaf}_req.pem"
+    need "${leaf}_cert.pem"
 }
 
 for alg in $ALGS; do
     echo "=== $alg ==="
     prov=$(prov_name "$alg")   # provider key-type name (genpkey / OID)
     # PQC CA  (file name = label, genpkey algorithm = provider name)
+    rm -f "ca_${alg}_key.pem" "ca_${alg}.pem"
     $OSSL genpkey $PROV -algorithm "$prov" -out "ca_${alg}_key.pem"
     $OSSL req -new -x509 $PROV -key "ca_${alg}_key.pem" -out "ca_${alg}.pem" \
         -days 3650 -subj "$SUBJ_CA_P"
+    need "ca_${alg}_key.pem" "ca_${alg}.pem"
     # PQC server + client leaves (issued by the PQC CA)
     gen_leaf "$prov" "ca_${alg}" "server_${alg}" "$SUBJ_SRV"
     gen_leaf "$prov" "ca_${alg}" "client_${alg}" "$SUBJ_CLI"
 
     # Catalyst: RSA leaf carrying the PQC alt key, self alternative-signed.
+    rm -f "catalyst_${alg}_alt_key.pem" "catalyst_${alg}_key.pem" "catalyst_${alg}_cert.pem"
     $OSSL genpkey $PROV -algorithm "$prov" -out "catalyst_${alg}_alt_key.pem"
+    need "catalyst_${alg}_alt_key.pem"
     $OSSL pkey $PROV -in "catalyst_${alg}_alt_key.pem" -pubout -out "catalyst_${alg}_alt_pub.pem"
     $OSSL genpkey $PROV -algorithm RSA -out "catalyst_${alg}_key.pem"
+    need "catalyst_${alg}_key.pem"
     $OSSL req -new $PROV -key "catalyst_${alg}_key.pem" -out "catalyst_${alg}_req.pem" -subj "$SUBJ_SRV"
     cat > "catalyst_${alg}.ext" <<EOF
 subjectAltPublicKeyInfo = file:catalyst_${alg}_alt_pub.pem
@@ -126,6 +150,7 @@ EOF
         -CA ca_rsa.pem -CAkey ca_rsa_key.pem -CAcreateserial \
         -out "catalyst_${alg}_cert.pem" -days 3650 -extfile "catalyst_${alg}.ext"
     rm -f "catalyst_${alg}_req.pem" "catalyst_${alg}.ext" "catalyst_${alg}_alt_pub.pem"
+    need "catalyst_${alg}_cert.pem"
 done
 
 # --- Composite single-certificate control ------------------------------------
@@ -146,9 +171,11 @@ for clabel in $COMPOSITE_ALGS; do
     echo "=== composite $clabel ==="
     cprov=$(prov_name "$clabel")   # provider sigalg name (genpkey)
     # Composite CA (file name = label, genpkey algorithm = provider name)
+    rm -f "ca_${clabel}_key.pem" "ca_${clabel}.pem"
     $OSSL genpkey $PROV -algorithm "$cprov" -out "ca_${clabel}_key.pem"
     $OSSL req -new -x509 $PROV -key "ca_${clabel}_key.pem" -out "ca_${clabel}.pem" \
         -days 3650 -subj "$SUBJ_CA_P"
+    need "ca_${clabel}_key.pem" "ca_${clabel}.pem"
     # Composite server + client leaves (issued by the composite CA)
     gen_leaf "$cprov" "ca_${clabel}" "server_${clabel}" "$SUBJ_SRV"
     gen_leaf "$cprov" "ca_${clabel}" "client_${clabel}" "$SUBJ_CLI"
@@ -159,10 +186,13 @@ done
 # "traditional" format as the classical-only baseline.
 gen_ecdsa() { # $1=tag $2=curve
     tag=$1; curve=$2
+    rm -f "ca_ecdsa_${tag}_key.pem" "ca_ecdsa_${tag}.pem" \
+          "ecdsa_${tag}_key.pem" "ecdsa_${tag}_cert.pem"
     $OSSL genpkey $PROV -algorithm EC -pkeyopt "ec_paramgen_curve:$curve" \
         -out "ca_ecdsa_${tag}_key.pem"
     $OSSL req -new -x509 $PROV -key "ca_ecdsa_${tag}_key.pem" \
         -out "ca_ecdsa_${tag}.pem" -days 3650 -subj "$SUBJ_CA_C"
+    need "ca_ecdsa_${tag}_key.pem" "ca_ecdsa_${tag}.pem"
     $OSSL genpkey $PROV -algorithm EC -pkeyopt "ec_paramgen_curve:$curve" \
         -out "ecdsa_${tag}_key.pem"
     $OSSL req -new $PROV -key "ecdsa_${tag}_key.pem" \
@@ -171,11 +201,40 @@ gen_ecdsa() { # $1=tag $2=curve
         -CA "ca_ecdsa_${tag}.pem" -CAkey "ca_ecdsa_${tag}_key.pem" \
         -CAcreateserial -out "ecdsa_${tag}_cert.pem" -days 3650
     rm -f "ecdsa_${tag}_req.pem"
+    need "ecdsa_${tag}_key.pem" "ecdsa_${tag}_cert.pem"
 }
 
 gen_ecdsa p256 P-256
 gen_ecdsa p384 P-384
 gen_ecdsa p521 P-521
+
+# --- Final self-check: every expected asset must exist & be non-empty --------
+# This is the backstop against apps/openssl's rc=0-on-failure behaviour: even if
+# a per-step need() were ever missed, no fixture set is declared good unless the
+# complete expected manifest (every bare alg, every composite alg, ECDSA, RSA)
+# is present.  Missing entries are collected and reported together, then fatal.
+missing=
+chk() { [ -s "$OUT/$1" ] || missing="$missing $1"; }
+for alg in $ALGS; do
+    chk "ca_${alg}.pem";          chk "ca_${alg}_key.pem"
+    chk "server_${alg}_cert.pem"; chk "server_${alg}_key.pem"
+    chk "client_${alg}_cert.pem"; chk "client_${alg}_key.pem"
+    chk "catalyst_${alg}_cert.pem"; chk "catalyst_${alg}_key.pem"
+    chk "catalyst_${alg}_alt_key.pem"
+done
+for clabel in $COMPOSITE_ALGS; do
+    chk "ca_${clabel}.pem";          chk "ca_${clabel}_key.pem"
+    chk "server_${clabel}_cert.pem"; chk "server_${clabel}_key.pem"
+    chk "client_${clabel}_cert.pem"; chk "client_${clabel}_key.pem"
+done
+for t in p256 p384 p521; do
+    chk "ca_ecdsa_${t}.pem"; chk "ca_ecdsa_${t}_key.pem"
+    chk "ecdsa_${t}_cert.pem"; chk "ecdsa_${t}_key.pem"
+done
+chk ca_rsa.pem; chk ca_rsa_key.pem
+chk server_rsa_cert.pem; chk server_rsa_key.pem
+chk client_rsa_cert.pem; chk client_rsa_key.pem
+[ -z "$missing" ] || die "self-check failed; missing/empty fixtures:$missing"
 
 echo "Generated smoke cert assets in $OUT for: $ALGS"
 echo "  composite: $COMPOSITE_ALGS"
