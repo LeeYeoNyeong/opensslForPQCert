@@ -46,7 +46,7 @@ RUNS=${RUNS:-100}
 IFACE=${IFACE:-eth0}
 
 export DYLD_LIBRARY_PATH="$ROOT${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-export LD_LIBRARY_PATH="$ROOT${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$ROOT:/usr/local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export OPENSSL_MODULES=${OPENSSL_MODULES:-/usr/local/lib/ossl-modules}
 
 FORMATS=${FORMATS:-"dual catalyst chameleon related pure traditional"}
