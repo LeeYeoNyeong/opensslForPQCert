@@ -4982,6 +4982,9 @@ int is_pqc_only_certificate(SSL_CONNECTION *s)
                     strstr(key_type_name, "p256_sphincssha2128ssimple") != NULL ||
                     strstr(key_type_name, "rsa3072_sphincssha2128ssimple") != NULL ||
                     strstr(key_type_name, "p384_sphincssha2192fsimple") != NULL ||
+                    strstr(key_type_name, "p384_sphincssha2192ssimple") != NULL ||
+                    strstr(key_type_name, "p521_sphincssha2256ssimple") != NULL ||
+                    strstr(key_type_name, "p521_sphincssha2256fsimple") != NULL ||
                     strstr(key_type_name, "p256_sphincsshake128fsimple") != NULL ||
                     strstr(key_type_name, "rsa3072_sphincsshake128fsimple") != NULL) {
                     return 1;
@@ -5030,6 +5033,9 @@ int is_pqc_only_certificate(SSL_CONNECTION *s)
                     strstr(key_type_name, "p256_sphincssha2128ssimple") != NULL ||
                     strstr(key_type_name, "rsa3072_sphincssha2128ssimple") != NULL ||
                     strstr(key_type_name, "p384_sphincssha2192fsimple") != NULL ||
+                    strstr(key_type_name, "p384_sphincssha2192ssimple") != NULL ||
+                    strstr(key_type_name, "p521_sphincssha2256ssimple") != NULL ||
+                    strstr(key_type_name, "p521_sphincssha2256fsimple") != NULL ||
                     strstr(key_type_name, "p256_sphincsshake128fsimple") != NULL ||
                     strstr(key_type_name, "rsa3072_sphincsshake128fsimple") != NULL) {
                     return 1;

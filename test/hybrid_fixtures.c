@@ -70,7 +70,8 @@ static int hf_ctx_pair(SSL_CTX **sctx, SSL_CTX **cctx,
 /* --- name <-> format -------------------------------------------------------- */
 
 static const char *const FMT_NAMES[HF_FORMAT_COUNT] = {
-    "dual", "catalyst", "chameleon", "related", "pure", "traditional"
+    "dual", "catalyst", "chameleon", "related", "pure", "traditional",
+    "composite"
 };
 
 const char *hf_format_name(HF_FORMAT fmt)
@@ -549,6 +550,25 @@ static int build_traditional(const char *tag, const char *cd,
     return ok;
 }
 
+/*
+ * Composite: a single leaf certificate whose key is an oqsprovider composite
+ * sigalg (e.g. p384_mldsa65).  This is structurally the pure-PQC single-cert
+ * path: the fork's is_pqc_only_certificate() classifies the composite key, so
+ * the server sends exactly one PQCertificateVerify carrying the composite
+ * (combined classical+PQC) signature and NO classical CertificateVerify, and
+ * hybrid auth is not negotiated.  None of the dual-certificate APIs
+ * (SSL_CTX_set_pq_certificate / pq_verify_store / enable_dual_certs) are used.
+ * Consequently the combined sign/verify cost is recorded in the measurement
+ * binary's pq_* CSV columns (classical_* = 0).  |label| selects the fixtures
+ * server_<label>_{cert,key}.pem and CA ca_<label>.pem; the wiring is identical
+ * to build_pure().
+ */
+static int build_composite(const char *label, const char *cd,
+                           SSL_CTX **sctx, SSL_CTX **cctx)
+{
+    return build_pure(label, cd, sctx, cctx);
+}
+
 int hf_build_pair(HF_FORMAT fmt, const char *pq_alg, const char *certsdir,
                   SSL_CTX **sctx, SSL_CTX **cctx)
 {
@@ -564,6 +584,7 @@ int hf_build_pair(HF_FORMAT fmt, const char *pq_alg, const char *certsdir,
     case HF_RELATED:     ok = build_related(pq_alg, certsdir, sctx, cctx); break;
     case HF_PURE:        ok = build_pure(pq_alg, certsdir, sctx, cctx); break;
     case HF_TRADITIONAL: ok = build_traditional(pq_alg, certsdir, sctx, cctx); break;
+    case HF_COMPOSITE:   ok = build_composite(pq_alg, certsdir, sctx, cctx); break;
     default:             ok = 0; break;
     }
 

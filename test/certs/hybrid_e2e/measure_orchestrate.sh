@@ -3,8 +3,10 @@
 # AWS measurement orchestrator for the hybrid PQC certificate matrix.
 #
 # Drives test/hybrid_measure across the full matrix:
-#   formats   : dual catalyst chameleon related  (+ pure, traditional baselines)
-#   algorithms: 11 PQC variants (ML-DSA / Falcon / SLH-DSA-SHA2) per format
+#   formats   : dual catalyst chameleon related  (+ pure, traditional, composite
+#               baselines/controls)
+#   algorithms: 11 PQC variants (ML-DSA / Falcon / SLH-DSA-SHA2) per format;
+#               composite uses its own 11 ECDSA-paired composite sigalg labels
 #   network   : loss {0,5,10}% and bandwidth {1,5,10}Mbit, applied SEPARATELY
 #               (loss figure and bandwidth figure are distinct experiments --
 #               they are never combined in one run).
@@ -26,7 +28,7 @@
 #   PORT        TCP port                           (default 4433)
 #   CERTS       fixture dir   (default: ./smoke next to this script)
 #   OPENSSL_ROOT  repo root   (default: three levels up)
-#   FORMATS     space list    (default: dual catalyst chameleon related pure traditional)
+#   FORMATS     space list    (default: dual catalyst chameleon related pure traditional composite)
 #   ALGS        space list of PQC variants
 #   LOSSES      loss %% list   (default: 0 5 10)
 #   BWS         bandwidth list (default: 0 1 5 10 ; 0 = unshaped)
@@ -49,7 +51,7 @@ export DYLD_LIBRARY_PATH="$ROOT${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 export LD_LIBRARY_PATH="$ROOT:/usr/local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export OPENSSL_MODULES=${OPENSSL_MODULES:-/usr/local/lib/ossl-modules}
 
-FORMATS=${FORMATS:-"dual catalyst chameleon related pure traditional"}
+FORMATS=${FORMATS:-"dual catalyst chameleon related pure traditional composite"}
 # ALGS are *labels* (FIPS-205 SLH-DSA naming).  They name the fixture files the
 # measurement binary loads and become the CSV "algorithm" column for the paper.
 # No genpkey happens here, so no provider-name translation is needed: the keys
@@ -58,10 +60,21 @@ FORMATS=${FORMATS:-"dual catalyst chameleon related pure traditional"}
 ALGS=${ALGS:-"mldsa44 mldsa65 mldsa87 falcon512 falcon1024 \
 slhdsasha2128s slhdsasha2128f slhdsasha2192s slhdsasha2192f \
 slhdsasha2256s slhdsasha2256f"}
+# Composite labels (ECDSA curve paired to the PQC level).  Like ALGS these are
+# the fixture labels; for SLH-DSA the label keeps the slhdsa naming while the key
+# was generated under the provider name (handled in gen_smoke_certs.sh).
+COMPOSITE_ALGS=${COMPOSITE_ALGS:-"p256_mldsa44 p384_mldsa65 p521_mldsa87 \
+p256_falcon512 p521_falcon1024 \
+p256_slhdsasha2128s p256_slhdsasha2128f \
+p384_slhdsasha2192s p384_slhdsasha2192f \
+p521_slhdsasha2256s p521_slhdsasha2256f"}
 LOSSES=${LOSSES:-"0 5 10"}
 BWS=${BWS:-"0 1 5 10"}
 
 # Security-level label (matches the measure-prep pairing) and ECDSA tag per PQC.
+# Composite levels follow the PQC component (the stronger half), matching the
+# (ECDSA,PQC) pairing of the dual/related fixtures so the same Cat lines up for
+# the "combined (composite) vs separate (dual) vs embedded (catalyst)" graph.
 cat_level() {
     case "$1" in
         mldsa44)              echo "Cat2" ;;      # FIPS-204 Cat2, paired to P-256
@@ -69,14 +82,24 @@ cat_level() {
         mldsa65|slhdsasha2192s|slhdsasha2192f)   echo "Cat3" ;;
         mldsa87|falcon1024|slhdsasha2256s|slhdsasha2256f) echo "Cat5" ;;
         p256) echo "Cat1" ;; p384) echo "Cat3" ;; p521) echo "Cat5" ;;
+        # Composite labels (PQC component drives the level).
+        p256_mldsa44)                              echo "Cat2" ;;
+        p256_falcon512|p256_slhdsasha2128s|p256_slhdsasha2128f) echo "Cat1" ;;
+        p384_mldsa65|p384_slhdsasha2192s|p384_slhdsasha2192f)   echo "Cat3" ;;
+        p521_mldsa87|p521_falcon1024|p521_slhdsasha2256s|p521_slhdsasha2256f) echo "Cat5" ;;
         *) echo "-" ;;
     esac
 }
 
-# For the traditional baseline iterate the three ECDSA curve tags instead of the
-# PQC list.
+# Per-format algorithm list: the traditional baseline walks the three ECDSA curve
+# tags, composite walks its own ECDSA-paired composite labels, every other format
+# walks the shared PQC label list.
 algs_for_format() {
-    if [ "$1" = "traditional" ]; then echo "p256 p384 p521"; else echo "$ALGS"; fi
+    case "$1" in
+        traditional) echo "p256 p384 p521" ;;
+        composite)   echo "$COMPOSITE_ALGS" ;;
+        *)           echo "$ALGS" ;;
+    esac
 }
 
 # Conditions for a combo: each loss value (bw unshaped) AND each bw value (loss

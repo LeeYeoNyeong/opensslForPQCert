@@ -60,7 +60,16 @@ prov_name() { # label -> oqsprovider algorithm name (genpkey / OBJ_txt2obj)
         slhdsasha2192f) echo sphincssha2192fsimple ;;
         slhdsasha2256s) echo sphincssha2256ssimple ;;
         slhdsasha2256f) echo sphincssha2256fsimple ;;
-        *) echo "$1" ;;   # ML-DSA / Falcon: label == provider name
+        # Composite SLH-DSA labels: ECDSAcurve_slhdsa... -> ECDSAcurve_sphincs...simple
+        # (only the SLH-DSA component differs; the ECDSA-curve prefix is kept).
+        p256_slhdsasha2128s) echo p256_sphincssha2128ssimple ;;
+        p256_slhdsasha2128f) echo p256_sphincssha2128fsimple ;;
+        p384_slhdsasha2192s) echo p384_sphincssha2192ssimple ;;
+        p384_slhdsasha2192f) echo p384_sphincssha2192fsimple ;;
+        p521_slhdsasha2256s) echo p521_sphincssha2256ssimple ;;
+        p521_slhdsasha2256f) echo p521_sphincssha2256fsimple ;;
+        # ML-DSA / Falcon (bare or composite): label == provider name.
+        *) echo "$1" ;;
     esac
 }
 
@@ -119,6 +128,32 @@ EOF
     rm -f "catalyst_${alg}_req.pem" "catalyst_${alg}.ext" "catalyst_${alg}_alt_pub.pem"
 done
 
+# --- Composite single-certificate control ------------------------------------
+# draft-ounsworth-style composite: a SINGLE leaf whose key is an oqsprovider
+# composite sigalg (ECDSA curve paired to the PQC security level).  No alt key,
+# no separate PQC chain -- it is the pure-PQC single-cert wiring with a composite
+# key, so only the ca/server/client leaves are issued (matching build_pure /
+# build_composite in hybrid_fixtures.c).  Labels equal the provider name for
+# ML-DSA / Falcon; for SLH-DSA the label keeps the FIPS-205 slhdsa naming
+# (p256_slhdsasha2128f) while genpkey uses the provider name via prov_name().
+COMPOSITE_ALGS=${COMPOSITE_ALGS:-"p256_mldsa44 p384_mldsa65 p521_mldsa87 \
+p256_falcon512 p521_falcon1024 \
+p256_slhdsasha2128s p256_slhdsasha2128f \
+p384_slhdsasha2192s p384_slhdsasha2192f \
+p521_slhdsasha2256s p521_slhdsasha2256f"}
+
+for clabel in $COMPOSITE_ALGS; do
+    echo "=== composite $clabel ==="
+    cprov=$(prov_name "$clabel")   # provider sigalg name (genpkey)
+    # Composite CA (file name = label, genpkey algorithm = provider name)
+    $OSSL genpkey $PROV -algorithm "$cprov" -out "ca_${clabel}_key.pem"
+    $OSSL req -new -x509 $PROV -key "ca_${clabel}_key.pem" -out "ca_${clabel}.pem" \
+        -days 3650 -subj "$SUBJ_CA_P"
+    # Composite server + client leaves (issued by the composite CA)
+    gen_leaf "$cprov" "ca_${clabel}" "server_${clabel}" "$SUBJ_SRV"
+    gen_leaf "$cprov" "ca_${clabel}" "client_${clabel}" "$SUBJ_CLI"
+done
+
 # --- Traditional ECDSA baseline (security-level paired control) --------------
 # P-256 (Cat1), P-384 (Cat3), P-521 (Cat5).  Used by the measurement binary's
 # "traditional" format as the classical-only baseline.
@@ -142,4 +177,6 @@ gen_ecdsa p256 P-256
 gen_ecdsa p384 P-384
 gen_ecdsa p521 P-521
 
-echo "Generated smoke cert assets in $OUT for: $ALGS (+ ECDSA p256/p384/p521)"
+echo "Generated smoke cert assets in $OUT for: $ALGS"
+echo "  composite: $COMPOSITE_ALGS"
+echo "  + ECDSA p256/p384/p521"

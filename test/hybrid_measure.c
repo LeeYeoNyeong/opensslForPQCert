@@ -40,6 +40,19 @@
  *   pq_sign_ms,pq_verify_ms,classical_sign_ms,classical_verify_ms,
  *   cert_bytes,verify_ok
  *
+ * Composite format note (column semantics):
+ *   The "composite" format presents a single leaf certificate whose key is an
+ *   oqsprovider composite sigalg (e.g. p384_mldsa65).  Its combined classical+PQC
+ *   signature is ONE inseparable operation, so it cannot be split across the
+ *   classical_* and pq_* columns.  In this fork is_pqc_only_certificate()
+ *   classifies the composite key, so the server emits a single
+ *   PQCertificateVerify (no classical CertificateVerify) just like a pure PQC
+ *   leaf; the whole composite sign/verify cost is therefore recorded in
+ *   pq_sign_ms / pq_verify_ms and classical_sign_ms = classical_verify_ms = 0.
+ *   composite is a single-certificate control: hybrid is NOT negotiated and no
+ *   separate PQC certificate is sent, so verify_ok mirrors the pure baseline
+ *   (a completed handshake with oqsprovider loaded is a valid sample).
+ *
  * Build: compiled into the test tree.  For real crypto timings configure the
  * whole tree with -DHYBRID_MEASURE; without it handshake_ms and cert_bytes are
  * still valid and the crypto columns are reported as 0 (a warning is printed
@@ -90,7 +103,7 @@ int main(void)
 
 typedef struct {
     const char *role;       /* server | client | loopback */
-    const char *format;     /* dual|catalyst|chameleon|related|pure|traditional */
+    const char *format;     /* dual|catalyst|chameleon|related|pure|traditional|composite */
     const char *alg;        /* PQC key-type name, or ECDSA tag for traditional */
     const char *certs;      /* fixture directory */
     const char *host;       /* client: server host */
@@ -550,7 +563,7 @@ static void usage(void)
         "         [--host H] [--port P] [--runs N] [--csv FILE]\n"
         "         [--region R] [--loss L] [--bw B] [--cat-level C]\n"
         "       hybrid_measure --csv-header\n"
-        "  FMT: dual|catalyst|chameleon|related|pure|traditional\n");
+        "  FMT: dual|catalyst|chameleon|related|pure|traditional|composite\n");
 }
 
 int main(int argc, char **argv)

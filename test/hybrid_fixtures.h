@@ -33,6 +33,7 @@ typedef enum {
     HF_RELATED,     /* PQC leaf carrying an RFC 9763 RelatedCertificate ext  */
     HF_PURE,        /* pure PQC leaf, standard signature_algorithms path     */
     HF_TRADITIONAL, /* classical ECDSA leaf, baseline (no PQC)               */
+    HF_COMPOSITE,   /* single leaf with an oqsprovider composite sigalg key  */
     HF_FORMAT_COUNT
 } HF_FORMAT;
 
@@ -43,13 +44,16 @@ typedef enum {
  * never passed to a provider.  For SLH-DSA the label differs from the provider
  * key-type name the fixtures were generated under (sphincssha2*simple).  For
  * HF_TRADITIONAL |pq_alg| names the ECDSA curve fixture tag
- * ("p256"/"p384"/"p521").  Returns 1 on success; on failure
+ * ("p256"/"p384"/"p521").  For HF_COMPOSITE |pq_alg| is the composite fixture
+ * label (e.g. "p384_mldsa65"; for SLH-DSA the label is "p256_slhdsasha2128f"
+ * while the fixtures were generated under the provider name
+ * "p256_sphincssha2128fsimple").  Returns 1 on success; on failure
  * returns 0 with *sctx,*cctx freed and set to NULL.
  */
 int hf_build_pair(HF_FORMAT fmt, const char *pq_alg, const char *certsdir,
                   SSL_CTX **sctx, SSL_CTX **cctx);
 
-/* "dual"/"catalyst"/"chameleon"/"related"/"pure"/"traditional". */
+/* "dual"/"catalyst"/"chameleon"/"related"/"pure"/"traditional"/"composite". */
 const char *hf_format_name(HF_FORMAT fmt);
 int hf_format_from_name(const char *name, HF_FORMAT *out);
 
