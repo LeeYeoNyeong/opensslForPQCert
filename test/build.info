@@ -549,7 +549,7 @@ IF[{- !$disabled{tests} -}]
 
   SOURCE[hybrid_measure]=hybrid_measure.c hybrid_fixtures.c
   INCLUDE[hybrid_measure]=.. ../include ../apps/include
-  DEPEND[hybrid_measure]=../libcrypto.a ../libssl.a
+  DEPEND[hybrid_measure]=../libcrypto ../libssl
 
   SOURCE[ssl_handshake_rtt_test]=ssl_handshake_rtt_test.c helpers/ssltestlib.c
   INCLUDE[ssl_handshake_rtt_test]=../include ../apps/include ..
