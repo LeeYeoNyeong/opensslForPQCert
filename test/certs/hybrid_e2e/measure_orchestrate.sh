@@ -163,8 +163,28 @@ mark_combo() { # $1=fmt $2=alg
 }
 
 # ---- server role ----------------------------------------------------------
+# Ensure THIS run owns port $PORT. A desynced/interrupted prior run can leave a
+# stale `hybrid_measure --role server` blocked on accept(); it keeps the port
+# and serves the WRONG combo's certificate. Clients then connect to it and the
+# handshake fails with "certificate verify failed" (mismatched chain) -- which
+# looks like a verification bug but is just a stale listener. Kill any stale
+# server and wait for the port to clear before binding.
+_port_free() { ! ss -tln 2>/dev/null | grep -q ":$PORT "; }
+_wait_free()  { i=0; while [ "$i" -lt 12 ]; do _port_free && return 0; sleep 0.25; i=$((i + 1)); done; return 1; }
+free_port() {
+    _port_free && return 0
+    pkill -x hybrid_measure 2>/dev/null || true   # graceful first
+    _wait_free && return 0
+    pkill -9 -x hybrid_measure 2>/dev/null || true # escalate: a server blocked
+    _wait_free && return 0                          # in accept() may ignore TERM
+    echo "[server] FATAL: port $PORT still in use after SIGKILL -- a stale" \
+         "server would serve the wrong certificate; aborting" >&2
+    return 1
+}
+
 run_server() {
     total=$(runs_per_combo)
+    free_port || exit 3
     echo "[server] matrix; $total handshakes/combo on port $PORT (resume=$RESUME)" >&2
     for fmt in $FORMATS; do
         for alg in $(algs_for_format "$fmt"); do
@@ -174,8 +194,17 @@ run_server() {
             fi
             echo "[server] $fmt x $alg ($total handshakes)" >&2
             "$BIN" --role server --format "$fmt" --alg "$alg" \
-                --certs "$CERTS" --port "$PORT" --runs "$total" \
-                || echo "[server] WARN $fmt x $alg returned $?" >&2
+                --certs "$CERTS" --port "$PORT" --runs "$total"
+            rc=$?
+            if [ "$rc" != 0 ]; then
+                # A non-zero server here is almost always a bind failure (stale
+                # listener on :$PORT). Continuing would let that stale server
+                # poison every client combo, so abort loudly instead.
+                echo "[server] FATAL $fmt x $alg returned $rc (listen/bind" \
+                     "failed on :$PORT?) -- aborting so clients never verify" \
+                     "against a mismatched certificate" >&2
+                exit 4
+            fi
             mark_combo "$fmt" "$alg"
             sleep 1   # brief gap so the client can detect the next listener
         done
