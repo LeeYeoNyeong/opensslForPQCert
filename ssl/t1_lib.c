@@ -5000,7 +5000,10 @@ int is_pqc_only_certificate(SSL_CONNECTION *s)
                     (strstr(key_type_name, "sphincssha2128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
                     (strstr(key_type_name, "sphincssha2128ssimple") != NULL && strchr(key_type_name, '_') == NULL) ||
                     (strstr(key_type_name, "sphincsshake128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2192fsimple") != NULL && strchr(key_type_name, '_') == NULL)) {
+                    (strstr(key_type_name, "sphincssha2192fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
+                    (strstr(key_type_name, "sphincssha2192ssimple") != NULL && strchr(key_type_name, '_') == NULL) ||
+                    (strstr(key_type_name, "sphincssha2256fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
+                    (strstr(key_type_name, "sphincssha2256ssimple") != NULL && strchr(key_type_name, '_') == NULL)) {
                     return 1;
                 }
             }
@@ -5052,7 +5055,10 @@ int is_pqc_only_certificate(SSL_CONNECTION *s)
                     (strstr(key_type_name, "sphincssha2128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
                     (strstr(key_type_name, "sphincssha2128ssimple") != NULL && strchr(key_type_name, '_') == NULL) ||
                     (strstr(key_type_name, "sphincsshake128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2192fsimple") != NULL && strchr(key_type_name, '_') == NULL)) {
+                    (strstr(key_type_name, "sphincssha2192fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
+                    (strstr(key_type_name, "sphincssha2192ssimple") != NULL && strchr(key_type_name, '_') == NULL) ||
+                    (strstr(key_type_name, "sphincssha2256fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
+                    (strstr(key_type_name, "sphincssha2256ssimple") != NULL && strchr(key_type_name, '_') == NULL)) {
                     return 1;
                 }
             }
