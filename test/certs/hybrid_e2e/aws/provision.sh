@@ -29,23 +29,26 @@ live. Run ./teardown.sh first (or remove the file manually if you are certain no
 tagged instances are running)."
 
 # --- cost warning + confirmation -------------------------------------------
+NTOTAL=$(( 2 * 3 * SHARDS ))   # (client+server) x 3 regions x SHARDS per region
 cat >&2 <<EOF
 
   ============================================================
-   NETWORK-26-00272 provisioning -- 6 x $INSTANCE_TYPE on-demand
+   NETWORK-26-00272 provisioning -- $NTOTAL x $INSTANCE_TYPE on-demand
+   (SHARDS=$SHARDS per region: intra-region load-balanced parallelism)
   ============================================================
-   client x3  Seoul ($CLIENT_REGION)
-   server x1  Tokyo (ap-northeast-1)
-   server x1  Singapore (ap-southeast-1)
-   server x1  Virginia (us-east-1)
+   client x$SHARDS  Seoul ($CLIENT_REGION)
+   server x$SHARDS  Tokyo (ap-northeast-1)
+   server x$SHARDS  Singapore (ap-southeast-1)
+   server x$SHARDS  Virginia (us-east-1)
 
-   Estimated cost: ~\$0.17-0.21 / instance-hour  ==>  ~\$1.20 / hour total
+   Estimated cost: ~\$0.17-0.21 / instance-hour  ==>  ~\$$(( NTOTAL * 20 / 100 )).xx / hour total
                    (+ EBS ${ROOT_VOLUME_GB}GB gp3 each; verify current pricing)
+   Wall-clock ~1/$SHARDS of a single-pair run; total instance-hours ~unchanged.
 
    *** These run until you call teardown.sh.  Forgetting = ongoing charges. ***
   ============================================================
 EOF
-confirm "Launch 6 on-demand instances now?" || exit 1
+confirm "Launch $NTOTAL on-demand instances now?" || exit 1
 
 OPERATOR_IP="$(my_ip)/32"
 log "operator IP (SSH allowed from): $OPERATOR_IP"
@@ -99,13 +102,12 @@ latest_ami() { # $1=region -> Ubuntu 24.04 amd64 server (Canonical)
         --query 'sort_by(Images,&CreationDate)[-1].ImageId' --output text
 }
 
-open_port_from() { # $1=region $2=sg $3=clientPublicIp
-    local region="$1" sg="$2" ip="$3" existing err
-    [ -n "$ip" ] && [ "$ip" != None ] \
-        || die "[$region] client public IP is empty/None -- cannot open tcp/$PORT"
-
-    # Revoke any stale tcp/$PORT rules (old client /32s from a prior provision)
-    # so the SG matches "exactly this pair's client /32".  SSH (22) is untouched.
+# Revoke ALL stale tcp/$PORT rules once per region (old client /32s from a prior
+# provision) so only the shard clients we authorize below can reach the servers.
+# Call ONCE before authorizing this region's shard clients (else authorizing
+# shard 1 after shard 0 would wipe shard 0's rule). SSH (22) is untouched.
+clear_port_rules() { # $1=region $2=sg
+    local region="$1" sg="$2" existing
     existing=$(aws ec2 describe-security-groups --region "$region" --group-id "$sg" \
         --query "SecurityGroups[0].IpPermissions[?ToPort==\`$PORT\` && FromPort==\`$PORT\`]" \
         --output json 2>/dev/null || echo "[]")
@@ -114,7 +116,13 @@ open_port_from() { # $1=region $2=sg $3=clientPublicIp
             --ip-permissions "$existing" >/dev/null 2>&1 || true
         log "[$region] revoked stale tcp/$PORT ingress rule(s)"
     fi
+}
 
+# Additively authorize one shard client's /32 (idempotent: ignore duplicates).
+authorize_port() { # $1=region $2=sg $3=clientPublicIp
+    local region="$1" sg="$2" ip="$3" err
+    [ -n "$ip" ] && [ "$ip" != None ] \
+        || die "[$region] client public IP is empty/None -- cannot open tcp/$PORT"
     err=$(mktemp)
     if aws ec2 authorize-security-group-ingress --region "$region" --group-id "$sg" \
             --protocol tcp --port "$PORT" --cidr "$ip/32" >/dev/null 2>"$err"; then
@@ -128,14 +136,14 @@ open_port_from() { # $1=region $2=sg $3=clientPublicIp
     rm -f "$err"
 }
 
-launch() { # $1=region $2=sg $3=ami $4=role $5=pair -> prints instance-id
-    local region="$1" sg="$2" ami="$3" role="$4" pair="$5"
+launch() { # $1=region $2=sg $3=ami $4=role $5=pair $6=shard -> prints instance-id
+    local region="$1" sg="$2" ami="$3" role="$4" pair="$5" shard="$6"
     aws ec2 run-instances --region "$region" --image-id "$ami" \
         --instance-type "$INSTANCE_TYPE" --key-name "$KEY_NAME" \
         --security-group-ids "$sg" --count 1 \
         --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$ROOT_VOLUME_GB,VolumeType=$ROOT_VOLUME_TYPE}" \
         --tag-specifications \
-          "ResourceType=instance,Tags=[{Key=Project,Value=$PROJECT},{Key=Role,Value=$role},{Key=Pair,Value=$pair},{Key=Name,Value=measure-$role-$pair}]" \
+          "ResourceType=instance,Tags=[{Key=Project,Value=$PROJECT},{Key=Role,Value=$role},{Key=Pair,Value=$pair},{Key=Shard,Value=$shard},{Key=Name,Value=measure-$role-$pair-s$shard}]" \
         --query 'Instances[0].InstanceId' --output text
 }
 
@@ -157,10 +165,10 @@ log "client region $CLIENT_REGION  SG=$CLIENT_SG  AMI=$CLIENT_AMI"
 # items accumulated as one-line JSON objects.  The manifest is rewritten after
 # EVERY instance so a crash mid-provision still leaves teardown.sh a usable file.
 ITEMS=()
-emit() { # role pair region id public private
-    ITEMS+=("$(jq -nc --arg role "$1" --arg pair "$2" --arg region "$3" \
-        --arg id "$4" --arg pub "$5" --arg priv "$6" \
-        '{id:$id,role:$role,pair:$pair,region:$region,public_ip:$pub,private_ip:$priv}')")
+emit() { # role pair shard region id public private
+    ITEMS+=("$(jq -nc --arg role "$1" --arg pair "$2" --argjson shard "$3" \
+        --arg region "$4" --arg id "$5" --arg pub "$6" --arg priv "$7" \
+        '{id:$id,role:$role,pair:$pair,shard:$shard,region:$region,public_ip:$pub,private_ip:$priv}')")
     printf '%s\n' "${ITEMS[@]}" | jq -s '.' > "$INSTANCES_JSON"
 }
 
@@ -178,47 +186,41 @@ emergency() {
 }
 trap emergency ERR INT TERM
 
-# --- 2. launch the 3 clients (Seoul) and capture their public IPs ----------
-declare CLIENT_TOKYO_IP="" CLIENT_SINGAPORE_IP="" CLIENT_VIRGINIA_IP=""
+# --- 2. launch the SHARDS x 3 clients (Seoul) and record them ---------------
+# Client IPs are read back from the manifest (inst_field) in phase 3, so no
+# associative array is needed (system bash is 3.2).
 for pair in $PAIRS; do
-    cid=$(launch "$CLIENT_REGION" "$CLIENT_SG" "$CLIENT_AMI" client "$pair")
-    log "launched client/$pair = $cid (Seoul); waiting for running ..."
-    read -r pub priv < <(wait_running_ip "$CLIENT_REGION" "$cid")
-    log "client/$pair up: public=$pub private=$priv"
-    emit client "$pair" "$CLIENT_REGION" "$cid" "$pub" "$priv"
-    case "$pair" in
-        tokyo)     CLIENT_TOKYO_IP="$pub" ;;
-        singapore) CLIENT_SINGAPORE_IP="$pub" ;;
-        virginia)  CLIENT_VIRGINIA_IP="$pub" ;;
-    esac
+    for shard in $(shard_ids); do
+        cid=$(launch "$CLIENT_REGION" "$CLIENT_SG" "$CLIENT_AMI" client "$pair" "$shard")
+        log "launched client/$pair/s$shard = $cid (Seoul); waiting for running ..."
+        read -r pub priv < <(wait_running_ip "$CLIENT_REGION" "$cid")
+        log "client/$pair/s$shard up: public=$pub private=$priv"
+        emit client "$pair" "$shard" "$CLIENT_REGION" "$cid" "$pub" "$priv"
+    done
 done
 
-client_ip_for_pair() {
-    case "$1" in
-        tokyo) echo "$CLIENT_TOKYO_IP" ;;
-        singapore) echo "$CLIENT_SINGAPORE_IP" ;;
-        virginia) echo "$CLIENT_VIRGINIA_IP" ;;
-    esac
-}
-
-# --- 3. per server region: SG + open port from its client, then launch -----
+# --- 3. per server region: SG + open port from EACH shard client, then launch
 for pair in $PAIRS; do
     sreg=$(server_region_for_pair "$pair")
     ssg=$(ensure_sg "$sreg")
     sami=$(latest_ami "$sreg")
-    open_port_from "$sreg" "$ssg" "$(client_ip_for_pair "$pair")"
-    log "[$sreg] SG=$ssg AMI=$sami ; launching server/$pair ..."
-    sid=$(launch "$sreg" "$ssg" "$sami" server "$pair")
-    read -r pub priv < <(wait_running_ip "$sreg" "$sid")
-    log "server/$pair up: public=$pub private=$priv"
-    emit server "$pair" "$sreg" "$sid" "$pub" "$priv"
+    clear_port_rules "$sreg" "$ssg"         # wipe stale rules once, then add all shards
+    for shard in $(shard_ids); do
+        cip=$(inst_field "$pair" "$shard" client public_ip)
+        authorize_port "$sreg" "$ssg" "$cip"
+        log "[$sreg] SG=$ssg AMI=$sami ; launching server/$pair/s$shard ..."
+        sid=$(launch "$sreg" "$ssg" "$sami" server "$pair" "$shard")
+        read -r pub priv < <(wait_running_ip "$sreg" "$sid")
+        log "server/$pair/s$shard up: public=$pub private=$priv"
+        emit server "$pair" "$shard" "$sreg" "$sid" "$pub" "$priv"
+    done
 done
 
 # --- 4. assemble instances.json --------------------------------------------
 printf '%s\n' "${ITEMS[@]}" | jq -s '.' > "$INSTANCES_JSON"
 trap - ERR INT TERM          # full fleet up + recorded; disarm emergency notice
 log "wrote $INSTANCES_JSON"
-jq -r '.[] | "  \(.role)/\(.pair)\t\(.region)\t\(.id)\tpub=\(.public_ip)"' "$INSTANCES_JSON" >&2
+jq -r '.[] | "  \(.role)/\(.pair)/s\(.shard)\t\(.region)\t\(.id)\tpub=\(.public_ip)"' "$INSTANCES_JSON" >&2
 
 cat >&2 <<EOF
 

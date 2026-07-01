@@ -14,10 +14,11 @@ set -euo pipefail
 require_instances
 
 PAIR="${1:-tokyo}"
+SHARD="${2:-0}"
 SMOKE="$REMOTE_HYBRID/smoke"
-CIP="$(inst_field "$PAIR" client public_ip)"
-SIP="$(inst_field "$PAIR" server public_ip)"
-[ -n "$CIP" ] && [ -n "$SIP" ] || die "could not resolve client/server IP for pair '$PAIR'"
+CIP="$(inst_field "$PAIR" "$SHARD" client public_ip)"
+SIP="$(inst_field "$PAIR" "$SHARD" server public_ip)"
+[ -n "$CIP" ] && [ -n "$SIP" ] || die "could not resolve client/server IP for pair '$PAIR' shard '$SHARD'"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 log "pair=$PAIR  client=$CIP  server=$SIP"

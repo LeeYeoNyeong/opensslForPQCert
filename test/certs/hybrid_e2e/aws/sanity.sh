@@ -25,28 +25,33 @@ LOGDIR="$AWS_DIR/sanity_logs"; mkdir -p "$LOGDIR"
 # common env passed to the orchestrator on both sides for a 1-combo, unshaped run
 ORCH_ENV="RUNS=$SRUNS PORT=$PORT FORMATS=$SFMT ALGS=$SALG LOSSES=0 BWS=0 RESUME=0"
 
+# Every (pair x shard) is a separately-built instance pair, so each must clear
+# the ABI/PoP gate independently.  dual x mldsa65 is self-contained (ORCH_ENV
+# overrides the shard subset), so it runs on any shard's instances.
 GATE=0
 for pair in $PAIRS; do
+  for shard in $(shard_ids); do
     sreg=$(server_region_for_pair "$pair")
-    sip=$(inst_field "$pair" server public_ip)
-    cip=$(inst_field "$pair" client public_ip)
-    label="sanity-$pair"
+    sip=$(inst_field "$pair" "$shard" server public_ip)
+    cip=$(inst_field "$pair" "$shard" client public_ip)
+    label="sanity-$pair-s$shard"
     csv_remote="$REMOTE_HYBRID/${label}.csv"
-    log "=== sanity $pair : client($cip) -> server($sip in $sreg) ==="
+    log "=== sanity $pair/s$shard : client($cip) -> server($sip in $sreg) ==="
+    ssh_to "$cip" "rm -f $csv_remote"
 
     # server: serve the single combo, then exits on its own (count is bounded)
     ssh_to "$sip" "cd $REMOTE_HYBRID && $ORCH_ENV ./measure_orchestrate.sh server" \
-        >"$LOGDIR/server_$pair.log" 2>&1 &
+        >"$LOGDIR/server_${pair}_s${shard}.log" 2>&1 &
     spid=$!
     sleep 4   # let the listener come up; the binary also retries connect ~5s
 
     # client: connect to the server PUBLIC ip, write a dedicated sanity CSV
     if ssh_to "$cip" "cd $REMOTE_HYBRID && sudo -E $ORCH_ENV CSV=$csv_remote \
             ./measure_orchestrate.sh client $sip $label" \
-            >"$LOGDIR/client_$pair.log" 2>&1; then
+            >"$LOGDIR/client_${pair}_s${shard}.log" 2>&1; then
         :
     else
-        log "FAIL $pair: client orchestrator exited non-zero (see sanity_logs/client_$pair.log)"
+        log "FAIL $pair/s$shard: client orchestrator exited non-zero (see sanity_logs/client_${pair}_s${shard}.log)"
         GATE=1
         # Client died before consuming the server's bounded handshake count, so
         # the server would block on accept(). Stop it (mirrors run.sh) so the
@@ -59,7 +64,7 @@ for pair in $PAIRS; do
 
     # pull + validate
     scp_from "$cip" "$csv_remote" "$LOGDIR/${label}.csv" 2>/dev/null \
-        || { log "FAIL $pair: no CSV produced"; GATE=1; continue; }
+        || { log "FAIL $pair/s$shard: no CSV produced"; GATE=1; continue; }
 
     # columns: 10=pq_verify_ms 14=verify_ok ; skip header
     verdict=$(awk -F, 'NR>1{
@@ -73,16 +78,17 @@ for pair in $PAIRS; do
     read -r n bad zero ok <<<"$verdict"
 
     if [ "${n:-0}" -eq 0 ]; then
-        log "FAIL $pair: CSV has no data rows"; GATE=1
+        log "FAIL $pair/s$shard: CSV has no data rows"; GATE=1
     elif [ "${zero:-0}" -gt 0 ]; then
-        log "FAIL $pair: pq_verify_ms==0 on $zero/$n rows => ABI SKEW (not a clean build)."
+        log "FAIL $pair/s$shard: pq_verify_ms==0 on $zero/$n rows => ABI SKEW (not a clean build)."
         log "      fix: ./setup.sh $pair   (forces make clean + HYBRID_MEASURE rebuild)"
         GATE=1
     elif [ "${bad:-0}" -gt 0 ]; then
-        log "FAIL $pair: verify_ok!=1 on $bad/$n rows (PoP not verified)"; GATE=1
+        log "FAIL $pair/s$shard: verify_ok!=1 on $bad/$n rows (PoP not verified)"; GATE=1
     else
-        log "PASS $pair: $n rows, verify_ok=1 all, pq_verify_ms live ($ok in (0,0.2]ms)"
+        log "PASS $pair/s$shard: $n rows, verify_ok=1 all, pq_verify_ms live ($ok in (0,0.2]ms)"
     fi
+  done
 done
 
 if [ "$GATE" = 0 ]; then

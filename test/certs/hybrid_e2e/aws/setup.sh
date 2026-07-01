@@ -37,15 +37,47 @@ echo "::: apt deps"
 sudo apt-get update -y
 sudo apt-get install -y build-essential git iproute2 cmake ninja-build perl pkg-config libssl-dev
 
+# --- fork OpenSSL FIRST -- oqs-provider must link THIS libcrypto -------------
+# oqs-provider's cmake resolves OpenSSL via OPENSSL_ROOT_DIR=$HOME/opensslForPQCert.
+# If the fork's libcrypto.so.3 is absent at cmake time, FindOpenSSL silently
+# falls back to the system libcrypto (3.0.13) -- a DIFFERENT OSSL_LIB_CTX than
+# the measurement binary (fork 3.3.0) -- and downstream ML-DSA decoding fails
+# with "unknown certificate type". So build the fork (CLEAN, always) BEFORE
+# liboqs/oqs-provider, then point oqs-provider's cmake at it below.
+echo "::: clone fork @ $REPO_BRANCH"
+if [ ! -d ~/opensslForPQCert/.git ]; then
+  git clone --branch "$REPO_BRANCH" "$REPO_URL" ~/opensslForPQCert \
+    || { git clone "$REPO_URL" ~/opensslForPQCert; git -C ~/opensslForPQCert checkout "$REPO_BRANCH"; }
+else
+  git -C ~/opensslForPQCert fetch --all -q
+  git -C ~/opensslForPQCert checkout "$REPO_BRANCH"
+  git -C ~/opensslForPQCert pull -q || true
+fi
+
+cd ~/opensslForPQCert
+echo "::: CLEAN HYBRID_MEASURE build (mandatory)"
+make clean >/dev/null 2>&1 || true
+./Configure -DHYBRID_MEASURE
+make -j"$JOBS"
+make -j"$JOBS" test/hybrid_measure
+# Record the fork revision just built so the provider stamp can key on it: if
+# the fork advances on a later run, oqs-provider must rebuild against the new
+# fork headers/libs instead of reusing a module compiled against the old ones.
+FORK_REV="$(git -C ~/opensslForPQCert rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
 # Rebuild deps unless an oqsprovider built from the SAME pinned refs is present.
 # A stamp file records the (liboqs|oqs-provider) refs the module was built from,
 # so changing a ref forces a rebuild instead of silently reusing stale bits.
+# Runs AFTER the fork build above so oqs-provider's cmake links the fork
+# libcrypto, not the system one.
 STAMP="$HOME/.oqs_refs"
-# The trailing marker is bumped whenever the build recipe changes in a way that
-# the refs alone don't capture (here: the SLH-DSA 192s/256s/256f generate.yml
-# patch). This invalidates stamps from instances built before the patch so they
-# rebuild instead of silently reusing a module missing those three variants.
-WANT="$LIBOQS_REF|$OQSPROV_REF|slhdsa6"
+# The trailing markers capture build inputs the refs alone don't: 'slhdsa6' =
+# the SLH-DSA 192s/256s/256f generate.yml patch; 'forkcrypto' = module built
+# against (and ldd-verified against) the fork libcrypto; 'fork-<rev>' = the
+# exact fork revision its headers/libs came from. A fork advance changes <rev>
+# and forces an oqs-provider rebuild, so the cached module can never lag the
+# freshly built fork. Bumping these invalidates any stale stamp.
+WANT="$LIBOQS_REF|$OQSPROV_REF|slhdsa6-forkcrypto|fork-$FORK_REV"
 if [ -f "$MODULES/oqsprovider.so" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$WANT" ]; then
   echo "::: oqsprovider already built from $WANT, skipping liboqs/oqs-provider"
 else
@@ -95,36 +127,42 @@ open(f, 'w').write('\n'.join(lines))
 print("generate.yml: SLH-DSA 192s/256s/256f set enable:true")
 PYEOF
   ) || { echo "FATAL: generate.yml SLH-DSA patch failed" >&2; exit 4; }
-  ( cd ~/oqs-provider && python3 oqs-template/generate.py ) \
+  ( cd ~/oqs-provider && LIBOQS_SRC_DIR="$HOME/liboqs" python3 oqs-template/generate.py ) \
     || { echo "FATAL: oqs-provider generate.py failed" >&2; exit 4; }
 
   cmake -S ~/oqs-provider -B ~/oqs-provider/build -GNinja \
-        -Dliboqs_DIR=/usr/local/lib/cmake/liboqs -DOPENSSL_ROOT_DIR=/usr \
+        -Dliboqs_DIR=/usr/local/lib/cmake/liboqs -DOPENSSL_ROOT_DIR=$HOME/opensslForPQCert \
         -DCMAKE_INSTALL_PREFIX=/usr/local
   ninja -C ~/oqs-provider/build
   sudo mkdir -p "$MODULES"
   # module is emitted under build/lib/ as a regular file -- restrict to a real
   # file so we never cp the cmake 'oqsprovider.dir' build directory by mistake.
   sudo cp "$(find ~/oqs-provider/build -name 'oqsprovider.so' -type f | head -1)" "$MODULES/"
+  # Confirm the module linked the FORK libcrypto, not the system one. cmake
+  # embeds $HOME/opensslForPQCert into the build-tree rpath when it used the
+  # fork, so ldd resolves libcrypto there; anything else means a split libctx
+  # (-> silent ML-DSA decode failures) and is fatal.
+  if ldd "$MODULES/oqsprovider.so" | grep -i libcrypto | grep -q "$HOME/opensslForPQCert"; then
+    echo "::: oqsprovider linked against fork libcrypto (OK)"
+  else
+    echo "FATAL: oqsprovider did NOT link the fork libcrypto:" >&2
+    ldd "$MODULES/oqsprovider.so" | grep -i libcrypto >&2
+    exit 5
+  fi
   echo "$WANT" > "$STAMP"   # record the refs this module was built from
 fi
 
-echo "::: clone fork @ $REPO_BRANCH"
-if [ ! -d ~/opensslForPQCert/.git ]; then
-  git clone --branch "$REPO_BRANCH" "$REPO_URL" ~/opensslForPQCert \
-    || { git clone "$REPO_URL" ~/opensslForPQCert; git -C ~/opensslForPQCert checkout "$REPO_BRANCH"; }
-else
-  git -C ~/opensslForPQCert fetch --all -q
-  git -C ~/opensslForPQCert checkout "$REPO_BRANCH"
-  git -C ~/opensslForPQCert pull -q || true
-fi
-
-cd ~/opensslForPQCert
-echo "::: CLEAN HYBRID_MEASURE build (mandatory)"
-make clean >/dev/null 2>&1 || true
-./Configure -DHYBRID_MEASURE
-make -j"$JOBS"
-make -j"$JOBS" test/hybrid_measure
+echo "::: install openssl.cnf to OPENSSLDIR (+ enable oqsprovider)"
+sudo mkdir -p /usr/local/ssl
+sudo cp "$HOME/opensslForPQCert/apps/openssl.cnf" /usr/local/ssl/openssl.cnf
+# The measurement binary's X.509 verify path honours OPENSSLDIR/openssl.cnf, so
+# oqsprovider must be active there to decode ML-DSA public keys in peer certs.
+# The fork cnf ships default-only with [default_sect] activate commented out;
+# adding oqsprovider implicitly disables the default provider, so activate both.
+sudo sed -i 's|^default = default_sect|default = default_sect\noqsprovider = oqsprovider_sect|' /usr/local/ssl/openssl.cnf
+sudo sed -i 's|^# activate = 1|activate = 1|' /usr/local/ssl/openssl.cnf
+grep -q '^\[oqsprovider_sect\]' /usr/local/ssl/openssl.cnf || \
+  printf '\n[oqsprovider_sect]\nactivate = 1\n' | sudo tee -a /usr/local/ssl/openssl.cnf >/dev/null
 
 echo "::: oqsprovider load check"
 # Include /usr/local/lib (liboqs.so) so the provider resolves, and load it
@@ -143,8 +181,8 @@ echo "SETUP_OK"
 REMOTE
 }
 
-setup_one() { # $1=role $2=pair $3=ip   (runs foreground; caller backgrounds it)
-    local role="$1" pair="$2" ip="$3" lf="$LOGDIR/${1}_${2}.log"
+setup_one() { # $1=role $2=pair $3=shard $4=ip  (runs foreground; caller backgrounds it)
+    local role="$1" pair="$2" shard="$3" ip="$4" lf="$LOGDIR/${1}_${2}_s${3}.log"
     {
         echo "=== setup $role/$pair ($ip) ==="
         remote_build_body | ssh_to "$ip" "bash -s -- \
@@ -156,12 +194,12 @@ setup_one() { # $1=role $2=pair $3=ip   (runs foreground; caller backgrounds it)
 # Background directly in this loop so the PIDs are direct children (waitable).
 FILTER="${1:-}"
 PIDS=(); NAMES=()
-while IFS=$'\t' read -r pair role region id pub priv; do
+while IFS=$'\t' read -r pair shard role region id pub priv; do
     [ -n "$FILTER" ] && [ "$pair" != "$FILTER" ] && continue
-    log "starting setup: $role/$pair @ $pub (log: setup_logs/${role}_${pair}.log)"
-    setup_one "$role" "$pair" "$pub" &
+    log "starting setup: $role/$pair/s$shard @ $pub (log: setup_logs/${role}_${pair}_s${shard}.log)"
+    setup_one "$role" "$pair" "$shard" "$pub" &
     PIDS+=("$!")
-    NAMES+=("$role/$pair")
+    NAMES+=("$role/$pair/s$shard")
 done < <(inst_rows)
 
 # --- wait + report ---------------------------------------------------------
@@ -185,19 +223,19 @@ if [ -n "$FILTER" ]; then
     exit 0
 fi
 
-GEN_IP="$(inst_field tokyo client public_ip)"
-log "generating fixtures once on tokyo client ($GEN_IP)"
+GEN_IP="$(inst_field tokyo 0 client public_ip)"
+log "generating fixtures once on tokyo/s0 client ($GEN_IP)"
 ssh_to "$GEN_IP" "set -e
   export LD_LIBRARY_PATH=$REMOTE_REPO OPENSSL_MODULES=$REMOTE_MODULES
   cd $REMOTE_HYBRID
-  OPENSSL=$REMOTE_REPO/apps/openssl ./gen_smoke_certs.sh
+  OPENSSL=$REMOTE_REPO/apps/openssl bash ./gen_smoke_certs.sh
   tar czf /tmp/smoke.tgz -C $REMOTE_HYBRID smoke"
 scp_from "$GEN_IP" "/tmp/smoke.tgz" "$AWS_DIR/smoke.tgz"
 log "fixtures pulled -> $AWS_DIR/smoke.tgz"
 
-while IFS=$'\t' read -r pair role region id pub priv; do
-    [ "$pub" = "$GEN_IP" ] && { log "skip fixture push to generator ($role/$pair)"; continue; }
-    log "pushing fixtures -> $role/$pair ($pub)"
+while IFS=$'\t' read -r pair shard role region id pub priv; do
+    [ "$pub" = "$GEN_IP" ] && { log "skip fixture push to generator ($role/$pair/s$shard)"; continue; }
+    log "pushing fixtures -> $role/$pair/s$shard ($pub)"
     scp_to "$pub" "$AWS_DIR/smoke.tgz" "/tmp/smoke.tgz"
     ssh_to "$pub" "tar xzf /tmp/smoke.tgz -C $REMOTE_HYBRID"
 done < <(inst_rows)
@@ -214,22 +252,22 @@ done < <(inst_rows)
 # than holding a divergent one) still fails.  Any divergence => abort.
 log "verifying fixtures (CA + leaf certs/keys) are byte-identical across all instances"
 FX_REF=""; FX_REF_NAME=""; FX_REF_N=""
-while IFS=$'\t' read -r pair role region id pub priv; do
+while IFS=$'\t' read -r pair shard role region id pub priv; do
     read -r sum nfiles < <(ssh_to "$pub" "cd $REMOTE_HYBRID/smoke && \
         n=\$(ls *.pem | wc -l | tr -d ' '); d=\$(md5sum *.pem | sort | md5sum | cut -d' ' -f1); echo \$d \$n") \
-        || die "could not read fixtures on $role/$pair ($pub) -- fixture push failed?"
+        || die "could not read fixtures on $role/$pair/s$shard ($pub) -- fixture push failed?"
     if [ -z "$FX_REF" ]; then
-        FX_REF="$sum"; FX_REF_NAME="$role/$pair"; FX_REF_N="$nfiles"
+        FX_REF="$sum"; FX_REF_NAME="$role/$pair/s$shard"; FX_REF_N="$nfiles"
     elif [ "$nfiles" != "$FX_REF_N" ]; then
         # Count first: a host MISSING a leaf (composite/SLH-DSA skew) is the
         # primary failure mode, and a digest collision must never let a short
         # inventory through. Cheap, and independent of the digest pipeline.
-        die "fixture count mismatch: $role/$pair has $nfiles PEMs != $FX_REF_NAME has $FX_REF_N; fixtures not uniform (stale/partial push -- composite/SLH-DSA skew?)"
+        die "fixture count mismatch: $role/$pair/s$shard has $nfiles PEMs != $FX_REF_NAME has $FX_REF_N; fixtures not uniform (stale/partial push -- composite/SLH-DSA skew?)"
     elif [ "$sum" != "$FX_REF" ]; then
-        die "fixture mismatch: $role/$pair ($sum, $nfiles files) != $FX_REF_NAME ($FX_REF, $FX_REF_N files); fixtures not uniform (stale/partial push -- composite/SLH-DSA skew?)"
+        die "fixture mismatch: $role/$pair/s$shard ($sum, $nfiles files) != $FX_REF_NAME ($FX_REF, $FX_REF_N files); fixtures not uniform (stale/partial push -- composite/SLH-DSA skew?)"
     fi
-    log "  fixture digest $role/$pair = $sum ($nfiles files)"
+    log "  fixture digest $role/$pair/s$shard = $sum ($nfiles files)"
 done < <(inst_rows)
 log "fixtures uniform across all instances ($FX_REF, $FX_REF_N files each)"
 
-log "setup complete on all 6 instances. Next: ./sanity.sh"
+log "setup complete on all $(inst_rows | wc -l | tr -d ' ') instances. Next: ./sanity.sh"

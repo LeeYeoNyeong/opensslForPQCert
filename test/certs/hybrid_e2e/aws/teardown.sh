@@ -24,7 +24,8 @@ done
 require_instances
 
 log "instances slated for termination:"
-inst_rows | awk -F'\t' '{printf "  %s/%s\t%s\t%s\n",$2,$1,$3,$4}' >&2
+# inst_rows cols: 1=pair 2=shard 3=role 4=region 5=id
+inst_rows | awk -F'\t' '{printf "  %s/%s/s%s\t%s\t%s\n",$3,$1,$2,$4,$5}' >&2
 [ "$FULL" = 1 ] && log "(--full) will ALSO delete security groups + key pairs in every region"
 confirm "Terminate all of the above now?" || exit 1
 

@@ -35,11 +35,68 @@ server_region_for_pair() {
     esac
 }
 
-# pair -> region label baked into the CSV (passed to measure_orchestrate client)
+# pair -> region label baked into the CSV (passed to measure_orchestrate client).
+# The CSV "region" column stays the PURE region (no shard) so collect.sh can
+# merge every shard of a region into one logical region without rewriting rows.
 region_label_for_pair() { echo "seoul-$1"; }
 
 # Every region we touch (client region first).
 all_regions() { echo "$CLIENT_REGION ap-northeast-1 ap-southeast-1 us-east-1"; }
+
+# ---- intra-region load-balancing shards -----------------------------------
+# Each region runs $SHARDS independent client+server instance pairs so the
+# algorithm matrix is split across them by SIGNING COST, cutting wall-clock
+# without co-locating measurements (co-located crypto would contend for CPU and
+# pollute timings -- parallelism is ALWAYS across instance pairs, never inside
+# one).  Each shard measures its own algorithm subset x ALL formats x ALL
+# network conditions; the union of shards reproduces the full per-region grid.
+SHARDS="${SHARDS:-3}"
+shard_ids() { local k=0; while [ "$k" -lt "$SHARDS" ]; do echo "$k"; k=$((k+1)); done; }
+
+# Canonical full label lists (single source of truth; must match the
+# measure_orchestrate.sh defaults exactly).  25 labels = 11 PQC + 11 composite +
+# 3 ECDSA.  shard_* below partition these with no overlap and no gap.
+ALL_ALGS="mldsa44 mldsa65 mldsa87 falcon512 falcon1024 \
+slhdsasha2128s slhdsasha2128f slhdsasha2192s slhdsasha2192f \
+slhdsasha2256s slhdsasha2256f"
+ALL_COMPOSITE="p256_mldsa44 p384_mldsa65 p521_mldsa87 \
+p256_falcon512 p521_falcon1024 \
+p256_slhdsasha2128s p256_slhdsasha2128f \
+p384_slhdsasha2192s p384_slhdsasha2192f \
+p521_slhdsasha2256s p521_slhdsasha2256f"
+ALL_ECDSA="p256 p384 p521"
+
+# Round-robin fallback for shard counts other than the paper's N=3.
+shard_rr() { # $1=shard_id $2=list
+    local k="$1" i=0 w
+    for w in $2; do [ "$((i % SHARDS))" -eq "$k" ] && printf '%s ' "$w"; i=$((i+1)); done
+}
+
+# N=3 concrete layout: isolate the two heaviest SLH-DSA "small" variants (sign
+# ~300 ms) on shard 0, the remaining SLH-DSA on shard 1, and the light majority
+# (ML-DSA, Falcon, ALL composite, ALL ECDSA) on shard 2.
+shard_algs() { # $1=shard_id -> PQC labels for the 5 PQC-using formats
+    case "$SHARDS:$1" in
+        3:0) echo "slhdsasha2192s slhdsasha2256s" ;;
+        3:1) echo "slhdsasha2128s slhdsasha2128f slhdsasha2192f slhdsasha2256f" ;;
+        3:2) echo "mldsa44 mldsa65 mldsa87 falcon512 falcon1024" ;;
+        *)   shard_rr "$1" "$ALL_ALGS" ;;
+    esac
+}
+shard_composite() { # $1=shard_id -> composite labels for the composite format
+    case "$SHARDS:$1" in
+        3:0|3:1) echo "" ;;
+        3:2)     echo "$ALL_COMPOSITE" ;;
+        *)       shard_rr "$1" "$ALL_COMPOSITE" ;;
+    esac
+}
+shard_ecdsa() { # $1=shard_id -> ECDSA tags for the traditional format
+    case "$SHARDS:$1" in
+        3:0|3:1) echo "" ;;
+        3:2)     echo "$ALL_ECDSA" ;;
+        *)       shard_rr "$1" "$ALL_ECDSA" ;;
+    esac
+}
 
 # ---- instance shape -------------------------------------------------------
 INSTANCE_TYPE="${INSTANCE_TYPE:-c5.xlarge}"   # fixed perf, 4 vCPU; t-class forbidden
@@ -84,15 +141,17 @@ require_instances() {
     [ -f "$INSTANCES_JSON" ] || { echo "missing $INSTANCES_JSON -- run provision.sh first" >&2; exit 1; }
 }
 
-# field for a (pair,role): inst_field <pair> <role> <field>
+# field for a (pair,shard,role): inst_field <pair> <shard> <role> <field>.
+# shard defaults to 0 so single-shard callers/manifests keep working.
 inst_field() {
-    jq -r --arg p "$1" --arg r "$2" --arg f "$3" \
-        '.[] | select(.pair==$p and .role==$r) | .[$f]' "$INSTANCES_JSON"
+    jq -r --arg p "$1" --argjson s "${2:-0}" --arg r "$3" --arg f "$4" \
+        '.[] | select(.pair==$p and (.shard // 0)==$s and .role==$r) | .[$f]' "$INSTANCES_JSON"
 }
 
-# all rows as TSV: pair role region id public_ip private_ip
+# all rows as TSV: pair shard role region id public_ip private_ip
 inst_rows() {
-    jq -r '.[] | [.pair,.role,.region,.id,.public_ip,.private_ip] | @tsv' "$INSTANCES_JSON"
+    jq -r '.[] | [.pair,(.shard // 0),.role,.region,.id,.public_ip,.private_ip] | @tsv' \
+        "$INSTANCES_JSON"
 }
 
 # instance ids in a given region (for teardown / waits)
