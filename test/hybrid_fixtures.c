@@ -54,7 +54,14 @@ static int hf_ctx_pair(SSL_CTX **sctx, SSL_CTX **cctx,
             || !SSL_CTX_set_min_proto_version(c, TLS1_3_VERSION)
             || !SSL_CTX_set_max_proto_version(c, TLS1_3_VERSION))
         goto err;
-    if (SSL_CTX_use_certificate_file(s, certfile, SSL_FILETYPE_PEM) != 1
+    /*
+     * 3-tier PKI: certfile is "leaf + ICA" (two certs).  Load it with the
+     * *chain* loader so the server transmits leaf + ICA and the client can
+     * build leaf -> ICA -> Root against its trusted Root only.  (The plain
+     * SSL_CTX_use_certificate_file reads just the first cert, so the ICA would
+     * never reach the wire and chain verification would fail.)
+     */
+    if (SSL_CTX_use_certificate_chain_file(s, certfile) != 1
             || SSL_CTX_use_PrivateKey_file(s, keyfile, SSL_FILETYPE_PEM) != 1
             || SSL_CTX_check_private_key(s) != 1)
         goto err;
@@ -156,6 +163,29 @@ static X509_STORE *trust_store(const char *certsdir, const char *name)
     return store;
 }
 
+/*
+ * Load the per-algorithm PQC intermediate (ica_<alg>.pem) into a fresh
+ * single-element STACK_OF(X509).  Passed as the |chain| argument of
+ * SSL_CTX_set_pq_certificate so the server transmits pq_leaf + pq_ICA
+ * (ssl_add_pqc_cert_chain_ietf_format reads s->cert->pq_chain), letting the
+ * client build pq_leaf -> pq_ICA -> pq_Root against a Root-only pq_verify_store.
+ * set_pq_certificate dups the stack (ssl_cert_set1_pq_chain), so the caller
+ * still owns and must free the returned stack + its members.
+ */
+static STACK_OF(X509) *pq_ica_chain(const char *certsdir, const char *alg)
+{
+    char nb[160];
+    STACK_OF(X509) *chain = sk_X509_new_null();
+    X509 *ica = load_cert(certsdir, af(nb, sizeof(nb), "ica_%s.pem", alg));
+
+    if (chain == NULL || ica == NULL || !sk_X509_push(chain, ica)) {
+        X509_free(ica);
+        sk_X509_free(chain);
+        return NULL;
+    }
+    return chain;   /* owns |ica| */
+}
+
 static int add_basic_constraints(X509 *x)
 {
     X509V3_CTX ctx;
@@ -186,10 +216,11 @@ static int build_dual(const char *pq, const char *cd,
     X509 *pqcert = load_cert(cd, af(nb, sizeof(nb), "server_%s_cert.pem", pq));
     EVP_PKEY *pqkey = load_key(cd, af(kb, sizeof(kb), "server_%s_key.pem", pq));
     X509_STORE *pqstore = trust_store(cd, af(cab, sizeof(cab), "ca_%s.pem", pq));
+    STACK_OF(X509) *pqchain = pq_ica_chain(cd, pq);   /* pq leaf's ICA (transmitted) */
     int ok = 0;
 
     if (scert == NULL || skey == NULL || carsa == NULL
-            || pqcert == NULL || pqkey == NULL || pqstore == NULL)
+            || pqcert == NULL || pqkey == NULL || pqstore == NULL || pqchain == NULL)
         goto end;
 
     if (!hf_ctx_pair(sctx, cctx, scert, skey))
@@ -199,8 +230,9 @@ static int build_dual(const char *pq, const char *cd,
         goto end;
     SSL_CTX_set_verify(*cctx, SSL_VERIFY_PEER, NULL);
 
+    /* Transmit pq_leaf + pq_ICA; client trusts pq_Root only (3-tier chain). */
     if (!SSL_CTX_enable_dual_certs(*sctx)
-            || !SSL_CTX_set_pq_certificate(*sctx, pqcert, pqkey, NULL))
+            || !SSL_CTX_set_pq_certificate(*sctx, pqcert, pqkey, pqchain))
         goto end;
     if (!SSL_CTX_enable_dual_certs(*cctx)
             || !SSL_CTX_set1_pq_verify_store(*cctx, pqstore))
@@ -214,6 +246,7 @@ static int build_dual(const char *pq, const char *cd,
     X509_free(pqcert);
     EVP_PKEY_free(pqkey);
     X509_STORE_free(pqstore);
+    sk_X509_pop_free(pqchain, X509_free);
     return ok;
 }
 
@@ -221,22 +254,30 @@ static int build_dual(const char *pq, const char *cd,
 static int build_catalyst(const char *pq, const char *cd,
                           SSL_CTX **sctx, SSL_CTX **cctx)
 {
-    char cb[160], kb[160], ab[160];
+    char cb[160], kb[160], ab[160], cab[160];
     char *scert = cert_path(cd, af(cb, sizeof(cb), "catalyst_%s_cert.pem", pq));
     char *skey = cert_path(cd, af(kb, sizeof(kb), "catalyst_%s_key.pem", pq));
     X509 *catcert = load_cert(cd, af(cb, sizeof(cb), "catalyst_%s_cert.pem", pq));
     EVP_PKEY *altkey = load_key(cd, af(ab, sizeof(ab), "catalyst_%s_alt_key.pem", pq));
-    char *carsa = cert_path(cd, "ca_rsa.pem");
+    /*
+     * 3-tier Catalyst: the whole chain (Root/ICA/Leaf) is Catalyst certs, so the
+     * client's trust anchor is the dedicated Catalyst Root -- NOT the shared
+     * plain ca_rsa (which has no alternative key).  hf_ctx_pair loads
+     * catalyst_<alg>_cert.pem (= leaf + ICA) with the chain loader, so the server
+     * transmits leaf + ICA and X509v3_alt_sig_validate_path walks
+     * leaf -> ICA -> Root alternative signatures up to this Root.
+     */
+    char *catca = cert_path(cd, af(cab, sizeof(cab), "ca_catalyst_%s.pem", pq));
     int ok = 0;
 
     if (scert == NULL || skey == NULL || catcert == NULL
-            || altkey == NULL || carsa == NULL)
+            || altkey == NULL || catca == NULL)
         goto end;
 
     if (!hf_ctx_pair(sctx, cctx, scert, skey))
         goto end;
 
-    if (!SSL_CTX_load_verify_file(*cctx, carsa))
+    if (!SSL_CTX_load_verify_file(*cctx, catca))
         goto end;
     SSL_CTX_set_verify(*cctx, SSL_VERIFY_PEER, NULL);
 
@@ -250,7 +291,7 @@ static int build_catalyst(const char *pq, const char *cd,
  end:
     OPENSSL_free(scert);
     OPENSSL_free(skey);
-    OPENSSL_free(carsa);
+    OPENSSL_free(catca);
     X509_free(catcert);
     EVP_PKEY_free(altkey);
     return ok;
@@ -328,14 +369,19 @@ static X509 *make_chameleon_base(X509 *ca_rsa, EVP_PKEY *ca_rsa_key,
 static int build_chameleon(const char *pq, const char *cd,
                            SSL_CTX **sctx, SSL_CTX **cctx)
 {
-    char cab[160], cakb[160], dkb[160], pqcab[160];
+    char icab[160], ikb[160], dkb[160], pqcab[160];
     char *scert = cert_path(cd, "server_rsa_cert.pem");
     char *skey = cert_path(cd, "server_rsa_key.pem");
     char *carsa = cert_path(cd, "ca_rsa.pem");
-    X509 *ca_rsa = load_cert(cd, "ca_rsa.pem");
-    EVP_PKEY *ca_rsa_key = load_key(cd, "ca_rsa_key.pem");
-    X509 *ca_pq = load_cert(cd, af(cab, sizeof(cab), "ca_%s.pem", pq));
-    EVP_PKEY *ca_pq_key = load_key(cd, af(cakb, sizeof(cakb), "ca_%s_key.pem", pq));
+    /*
+     * 3-tier: the Base is issued by the classical ICA and the reconstructed
+     * Delta by the PQC ICA.  make_chameleon_base() takes the *issuing* CA cert
+     * and key for each side -- here the two ICAs, not the Roots.
+     */
+    X509 *ica_rsa = load_cert(cd, "ica_rsa.pem");
+    EVP_PKEY *ica_rsa_key = load_key(cd, "ica_rsa_key.pem");
+    X509 *ica_pq = load_cert(cd, af(icab, sizeof(icab), "ica_%s.pem", pq));
+    EVP_PKEY *ica_pq_key = load_key(cd, af(ikb, sizeof(ikb), "ica_%s_key.pem", pq));
     EVP_PKEY *base_main = load_key(cd, "server_rsa_key.pem");
     EVP_PKEY *delta_key = load_key(cd, af(dkb, sizeof(dkb), "server_%s_key.pem", pq));
     X509 *base = NULL;
@@ -343,11 +389,11 @@ static int build_chameleon(const char *pq, const char *cd,
     int ok = 0;
 
     if (scert == NULL || skey == NULL || carsa == NULL
-            || ca_rsa == NULL || ca_rsa_key == NULL || ca_pq == NULL
-            || ca_pq_key == NULL || base_main == NULL || delta_key == NULL)
+            || ica_rsa == NULL || ica_rsa_key == NULL || ica_pq == NULL
+            || ica_pq_key == NULL || base_main == NULL || delta_key == NULL)
         goto end;
 
-    base = make_chameleon_base(ca_rsa, ca_rsa_key, ca_pq, ca_pq_key,
+    base = make_chameleon_base(ica_rsa, ica_rsa_key, ica_pq, ica_pq_key,
                                base_main, delta_key);
     if (base == NULL)
         goto end;
@@ -355,8 +401,18 @@ static int build_chameleon(const char *pq, const char *cd,
     if (!hf_ctx_pair(sctx, cctx, scert, skey))
         goto end;
 
+    /*
+     * Present the single Base leaf, and transmit BOTH intermediates in the main
+     * certificate_list: the classical ICA (so Base -> rsa_ICA -> rsa_Root
+     * verifies) and the PQC ICA (so the reconstructed Delta -> pq_ICA -> pq_Root
+     * verifies -- ssl_verify_chameleon_dcd feeds peer_chain\{Base} as untrusted
+     * intermediates).  Clear the leftover chain from hf_ctx_pair first.
+     */
     if (!SSL_CTX_use_certificate(*sctx, base)
-            || !SSL_CTX_use_PrivateKey(*sctx, base_main))
+            || !SSL_CTX_use_PrivateKey(*sctx, base_main)
+            || !SSL_CTX_clear_chain_certs(*sctx)
+            || !SSL_CTX_add1_chain_cert(*sctx, ica_rsa)
+            || !SSL_CTX_add1_chain_cert(*sctx, ica_pq))
         goto end;
 
     if (!SSL_CTX_load_verify_file(*cctx, carsa))
@@ -378,10 +434,10 @@ static int build_chameleon(const char *pq, const char *cd,
     OPENSSL_free(scert);
     OPENSSL_free(skey);
     OPENSSL_free(carsa);
-    X509_free(ca_rsa);
-    EVP_PKEY_free(ca_rsa_key);
-    X509_free(ca_pq);
-    EVP_PKEY_free(ca_pq_key);
+    X509_free(ica_rsa);
+    EVP_PKEY_free(ica_rsa_key);
+    X509_free(ica_pq);
+    EVP_PKEY_free(ica_pq_key);
     EVP_PKEY_free(base_main);
     EVP_PKEY_free(delta_key);
     X509_free(base);
@@ -434,33 +490,36 @@ static X509 *make_related_pqc(EVP_PKEY *pqc_key, X509 *ca_pq,
 static int build_related(const char *pq, const char *cd,
                          SSL_CTX **sctx, SSL_CTX **cctx)
 {
-    char cab[160], cakb[160], pkb[160], pqcab[160];
+    char icab[160], ikb[160], pkb[160], pqcab[160];
     char *scert = cert_path(cd, "server_rsa_cert.pem");
     char *skey = cert_path(cd, "server_rsa_key.pem");
     char *carsa = cert_path(cd, "ca_rsa.pem");
     X509 *classical = load_cert(cd, "server_rsa_cert.pem");
-    X509 *ca_pq = load_cert(cd, af(cab, sizeof(cab), "ca_%s.pem", pq));
-    EVP_PKEY *ca_pq_key = load_key(cd, af(cakb, sizeof(cakb), "ca_%s_key.pem", pq));
+    /* 3-tier: the PQC leaf is issued by the PQC ICA (not the Root). */
+    X509 *ica_pq = load_cert(cd, af(icab, sizeof(icab), "ica_%s.pem", pq));
+    EVP_PKEY *ica_pq_key = load_key(cd, af(ikb, sizeof(ikb), "ica_%s_key.pem", pq));
     EVP_PKEY *pqc_key = load_key(cd, af(pkb, sizeof(pkb), "server_%s_key.pem", pq));
     X509 *pqc = NULL;
+    STACK_OF(X509) *pqchain = pq_ica_chain(cd, pq);   /* pq leaf's ICA (transmitted) */
     X509_STORE *pqstore = NULL;
     int ok = 0;
 
     if (scert == NULL || skey == NULL || carsa == NULL
-            || classical == NULL || ca_pq == NULL
-            || ca_pq_key == NULL || pqc_key == NULL)
+            || classical == NULL || ica_pq == NULL
+            || ica_pq_key == NULL || pqc_key == NULL || pqchain == NULL)
         goto end;
 
     /* Bind the PQC leaf to the classical leaf that is actually transmitted. */
-    pqc = make_related_pqc(pqc_key, ca_pq, ca_pq_key, classical);
+    pqc = make_related_pqc(pqc_key, ica_pq, ica_pq_key, classical);
     if (pqc == NULL)
         goto end;
 
     if (!hf_ctx_pair(sctx, cctx, scert, skey))
         goto end;
 
+    /* Transmit pq_leaf + pq_ICA; client trusts pq_Root only (3-tier chain). */
     if (!SSL_CTX_enable_dual_certs(*sctx)
-            || !SSL_CTX_set_pq_certificate(*sctx, pqc, pqc_key, NULL))
+            || !SSL_CTX_set_pq_certificate(*sctx, pqc, pqc_key, pqchain))
         goto end;
 
     if (!SSL_CTX_load_verify_file(*cctx, carsa))
@@ -478,10 +537,11 @@ static int build_related(const char *pq, const char *cd,
     OPENSSL_free(skey);
     OPENSSL_free(carsa);
     X509_free(classical);
-    X509_free(ca_pq);
-    EVP_PKEY_free(ca_pq_key);
+    X509_free(ica_pq);
+    EVP_PKEY_free(ica_pq_key);
     EVP_PKEY_free(pqc_key);
     X509_free(pqc);
+    sk_X509_pop_free(pqchain, X509_free);
     X509_STORE_free(pqstore);
     return ok;
 }

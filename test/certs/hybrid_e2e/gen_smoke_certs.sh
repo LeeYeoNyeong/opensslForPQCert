@@ -1,32 +1,48 @@
 #!/bin/sh
 # Generate per-algorithm hybrid PQC certificate fixtures for the cross-algorithm
-# e2e smoke harness (test/hybrid_smoke_test.c).
+# e2e smoke harness (test/hybrid_smoke_test.c) and the AWS measurement binary
+# (test/hybrid_measure).
 #
-# For every PQC algorithm in $ALGS this produces, under ./smoke/:
-#   PQC chain (Dual / Chameleon-delta / Related leaf source):
-#     ca_<alg>.pem        ca_<alg>_key.pem          - PQC CA
-#     server_<alg>_cert.pem server_<alg>_key.pem    - PQC leaf (issued by PQC CA)
-#     client_<alg>_cert.pem client_<alg>_key.pem    - PQC leaf for mutual TLS
-#   Catalyst single-certificate (RSA leaf + PQC alt key, self alt-signed):
-#     catalyst_<alg>_cert.pem      - RSA leaf (issuer ca_rsa) carrying the PQC alt
-#                                    public key + self alternative signature
-#     catalyst_<alg>_key.pem       - RSA main private key
-#     catalyst_<alg>_alt_key.pem   - PQC alternative private key (PQCertificateVerify)
-# Shared classical assets (issued once, reused by every algorithm):
-#     ca_rsa.pem ca_rsa_key.pem  server_rsa_cert.pem server_rsa_key.pem
-#     client_rsa_cert.pem client_rsa_key.pem
+# REALISTIC 3-TIER PKI (Root CA -> Intermediate CA -> Leaf), per the paper:
+#   * Root CA : self-signed, CA:TRUE.               File: ca_<x>.pem (trust anchor)
+#   * ICA     : issued by Root, CA:TRUE pathlen:0.   File: ica_<x>.pem
+#   * Leaf    : issued by ICA, CA:FALSE + EKU.       Transmitted chain = leaf + ICA
 #
-# The Catalyst alternative-signature OID is given by the oqsprovider algorithm
-# NAME (OBJ_txt2obj resolves it); openssl x509 -req then drives ALT_SIGNATURE_sign
-# with the supplied alt key, so alt_sig_validate_path verifies the leaf against
-# its own embedded alt public key on the receiving side.
+# The transmitted server certificate file is therefore TWO certs (leaf then ICA);
+# the client's trust anchor is the Root only.  For every chain type this yields:
+#   ca_<x>.pem   ca_<x>_key.pem      - Root CA (trust anchor)
+#   ica_<x>.pem  ica_<x>_key.pem     - Intermediate CA
+#   server_<x>_cert.pem              - leaf + ICA  (2 certs; leaf issued by ICA)
+#   server_<x>_key.pem               - leaf private key
+#   client_<x>_cert.pem client_<x>_key.pem - client leaf (+ ICA) for mutual TLS
+#
+# Per-algorithm chains produced:
+#   PQC chain (Dual PQC leaf / Chameleon-delta / Related PQC leaf source / Pure):
+#     ca_<alg>, ica_<alg>, server_<alg>, client_<alg>
+#   Catalyst FULL alternative-signature chain (single-certificate hybrid):
+#     ca_catalyst_<alg>, ica_catalyst_<alg> : RSA CA certs each carrying a PQC
+#         alternative key (subjectAltPublicKeyInfo) and an altSignatureValue
+#         signed by the PARENT's alt key (root self-alt-signed).  This forms the
+#         alt-signature chain that X509v3_alt_sig_validate_path() walks.
+#     catalyst_<alg>_cert.pem : leaf (+ ICA) whose altSignatureValue is signed by
+#         the ICA's alt key; subjectAltPublicKeyInfo is the leaf's own alt pubkey.
+#     catalyst_<alg>_key.pem      - RSA main private key
+#     catalyst_<alg>_alt_key.pem  - leaf PQC alt private key (PQCertificateVerify PoP)
+# Shared classical RSA chain (issued once, reused by dual/related/chameleon base):
+#   ca_rsa, ica_rsa, server_rsa, client_rsa
+# Composite single-certificate control chain (per ECDSA-paired composite label):
+#   ca_<clabel>, ica_<clabel>, server_<clabel>, client_<clabel>
+# Traditional ECDSA baseline (per curve tag p256/p384/p521):
+#   ca_ecdsa_<tag>, ica_ecdsa_<tag>, ecdsa_<tag>
 #
 # Requires the repo-built openssl with oqsprovider loadable. Set OPENSSL,
 # DYLD_LIBRARY_PATH and OPENSSL_MODULES before invoking (see the recipe wrapper).
+# OUT is overridable (default ./smoke) so a test run cannot clobber committed
+# fixtures -- run against a throwaway dir when validating changes.
 set -e
 
 DIR=$(cd "$(dirname "$0")" && pwd)
-OUT="$DIR/smoke"
+OUT="${OUT:-$DIR/smoke}"
 mkdir -p "$OUT"
 
 # Repo root = three levels up from test/certs/hybrid_e2e. macOS /bin/sh strips
@@ -39,8 +55,10 @@ OSSL=${OPENSSL:-$ROOT/apps/openssl}
 
 cd "$OUT"
 PROV="-provider oqsprovider -provider default"
-SUBJ_CA_C="/O=PQTest/CN=Test Classical CA"
-SUBJ_CA_P="/O=PQTest/CN=Test PQC CA"
+SUBJ_CA_C="/O=PQTest/CN=Test Classical Root CA"
+SUBJ_ICA_C="/O=PQTest/CN=Test Classical ICA"
+SUBJ_CA_P="/O=PQTest/CN=Test PQC Root CA"
+SUBJ_ICA_P="/O=PQTest/CN=Test PQC ICA"
 SUBJ_SRV="/O=PQTest/CN=server.example.com"
 SUBJ_CLI="/O=PQTest/CN=client.example.com"
 
@@ -83,81 +101,152 @@ prov_name() { # label -> oqsprovider algorithm name (genpkey / OBJ_txt2obj)
     esac
 }
 
-# --- Shared classical assets -------------------------------------------------
-rm -f ca_rsa_key.pem ca_rsa.pem
-$OSSL genpkey $PROV -algorithm RSA -out ca_rsa_key.pem
-$OSSL req -new -x509 $PROV -key ca_rsa_key.pem -out ca_rsa.pem -days 3650 -subj "$SUBJ_CA_C"
-need ca_rsa_key.pem ca_rsa.pem
-
-rm -f server_rsa_key.pem server_rsa_cert.pem
-$OSSL genpkey $PROV -algorithm RSA -out server_rsa_key.pem
-$OSSL req -new $PROV -key server_rsa_key.pem -out server_rsa_req.pem -subj "$SUBJ_SRV"
-$OSSL x509 -req $PROV -in server_rsa_req.pem -CA ca_rsa.pem -CAkey ca_rsa_key.pem \
-    -CAcreateserial -out server_rsa_cert.pem -days 3650
-rm -f server_rsa_req.pem
-need server_rsa_key.pem server_rsa_cert.pem
-
-rm -f client_rsa_key.pem client_rsa_cert.pem
-$OSSL genpkey $PROV -algorithm RSA -out client_rsa_key.pem
-$OSSL req -new $PROV -key client_rsa_key.pem -out client_rsa_req.pem -subj "$SUBJ_CLI"
-$OSSL x509 -req $PROV -in client_rsa_req.pem -CA ca_rsa.pem -CAkey ca_rsa_key.pem \
-    -CAcreateserial -out client_rsa_cert.pem -days 3650
-rm -f client_rsa_req.pem
-need client_rsa_key.pem client_rsa_cert.pem
-
-# --- Per-algorithm assets ----------------------------------------------------
-gen_leaf() { # $1=provider_alg $2=ca_prefix $3=leaf_prefix(label) $4=subj
-    # NB: use distinct names -- /bin/sh has no function-local scope, and reusing
-    # the caller's loop variable "alg" here would clobber it for the next call.
-    palg=$1; capfx=$2; leaf=$3; subj=$4
-    rm -f "${leaf}_key.pem" "${leaf}_cert.pem" "${leaf}_req.pem"
-    $OSSL genpkey $PROV -algorithm "$palg" -out "${leaf}_key.pem"
-    need "${leaf}_key.pem"
-    $OSSL req -new $PROV -key "${leaf}_key.pem" -out "${leaf}_req.pem" -subj "$subj"
-    $OSSL x509 -req $PROV -in "${leaf}_req.pem" -CA "${capfx}.pem" -CAkey "${capfx}_key.pem" \
-        -CAcreateserial -out "${leaf}_cert.pem" -days 3650
-    rm -f "${leaf}_req.pem"
-    need "${leaf}_cert.pem"
+# --- key generation (algspec: RSA | EC:CURVE | <provider-alg>) ----------------
+keygen() { # $1=outfile $2=algspec
+    rm -f "$1"
+    case "$2" in
+        EC:*) $OSSL genpkey $PROV -algorithm EC \
+                  -pkeyopt "ec_paramgen_curve:${2#EC:}" -out "$1" ;;
+        *)    $OSSL genpkey $PROV -algorithm "$2" -out "$1" ;;
+    esac
+    need "$1"
 }
 
+# --- Root + Intermediate CA (self-signed Root, ICA issued by Root) -----------
+gen_root_ica() { # $1=pfx $2=algspec $3=subj_root $4=subj_ica
+    _pfx=$1; _alg=$2; _sroot=$3; _sica=$4
+    rm -f "ca_${_pfx}_key.pem" "ca_${_pfx}.pem" \
+          "ica_${_pfx}_key.pem" "ica_${_pfx}.pem" "ica_${_pfx}_req.pem" "ica_${_pfx}.ext"
+    keygen "ca_${_pfx}_key.pem" "$_alg"
+    $OSSL req -new -x509 $PROV -key "ca_${_pfx}_key.pem" -out "ca_${_pfx}.pem" \
+        -days 3650 -subj "$_sroot" -addext "basicConstraints=critical,CA:TRUE"
+    need "ca_${_pfx}.pem"
+    keygen "ica_${_pfx}_key.pem" "$_alg"
+    $OSSL req -new $PROV -key "ica_${_pfx}_key.pem" -out "ica_${_pfx}_req.pem" -subj "$_sica"
+    printf 'basicConstraints = critical,CA:TRUE,pathlen:0\n' > "ica_${_pfx}.ext"
+    $OSSL x509 -req $PROV -in "ica_${_pfx}_req.pem" \
+        -CA "ca_${_pfx}.pem" -CAkey "ca_${_pfx}_key.pem" -CAcreateserial \
+        -out "ica_${_pfx}.pem" -days 3650 -extfile "ica_${_pfx}.ext"
+    rm -f "ica_${_pfx}_req.pem" "ica_${_pfx}.ext"
+    need "ica_${_pfx}.pem"
+}
+
+# --- leaf issued by an ICA; output cert file = leaf + ICA (transmitted chain) -
+gen_leaf3() { # $1=algspec $2=ica_pfx $3=leaf_pfx $4=subj $5=eku
+    _alg=$1; _ica=$2; _leaf=$3; _subj=$4; _eku=$5
+    rm -f "${_leaf}_key.pem" "${_leaf}_cert.pem" "${_leaf}_req.pem" \
+          "${_leaf}.ext" "${_leaf}_leaf.pem"
+    keygen "${_leaf}_key.pem" "$_alg"
+    $OSSL req -new $PROV -key "${_leaf}_key.pem" -out "${_leaf}_req.pem" -subj "$_subj"
+    printf 'basicConstraints = critical,CA:FALSE\nextendedKeyUsage = %s\n' "$_eku" \
+        > "${_leaf}.ext"
+    $OSSL x509 -req $PROV -in "${_leaf}_req.pem" \
+        -CA "ica_${_ica}.pem" -CAkey "ica_${_ica}_key.pem" -CAcreateserial \
+        -out "${_leaf}_leaf.pem" -days 3650 -extfile "${_leaf}.ext"
+    need "${_leaf}_leaf.pem"
+    cat "${_leaf}_leaf.pem" "ica_${_ica}.pem" > "${_leaf}_cert.pem"
+    rm -f "${_leaf}_req.pem" "${_leaf}.ext" "${_leaf}_leaf.pem"
+    need "${_leaf}_cert.pem"
+}
+
+# --- Catalyst full alternative-signature 3-tier chain ------------------------
+# Root/ICA/Leaf are all RSA certs carrying a PQC alternative key; each cert's
+# altSignatureValue is signed by its PARENT's alt key (Root self-alt-signed), so
+# X509v3_alt_sig_validate_path() verifies leaf->ICA->Root alt signatures.  Only
+# the leaf's alt private key is used at handshake time (PQCertificateVerify PoP).
+# The Catalyst chain is deliberately SEPARATE from the shared plain RSA chain:
+# putting an alt key on the shared Root would make the alt-signature walk require
+# alt keys on the plain dual/related/chameleon RSA leaves too, which they lack.
+gen_catalyst() { # $1=label $2=provider_alg
+    _clab=$1; _palg=$2
+    for _who in "ca_catalyst_${_clab}" "ica_catalyst_${_clab}" "catalyst_${_clab}"; do
+        keygen "${_who}_alt_key.pem" "$_palg"
+        rm -f "${_who}_alt_pub.pem"
+        $OSSL pkey $PROV -in "${_who}_alt_key.pem" -pubout -out "${_who}_alt_pub.pem"
+        need "${_who}_alt_pub.pem"
+        keygen "${_who}_key.pem" RSA
+    done
+
+    # ROOT: self-signed CA, alt-signed by its OWN alt key (top self-check).
+    rm -f "ca_catalyst_${_clab}.pem" "ca_catalyst_${_clab}_req.pem" "ca_catalyst_${_clab}.ext"
+    $OSSL req -new $PROV -key "ca_catalyst_${_clab}_key.pem" \
+        -out "ca_catalyst_${_clab}_req.pem" -subj "$SUBJ_CA_P"
+    cat > "ca_catalyst_${_clab}.ext" <<EOF
+basicConstraints = critical,CA:TRUE
+subjectAltPublicKeyInfo = file:ca_catalyst_${_clab}_alt_pub.pem
+altSignatureAlgorithm = ${_palg}
+altSignatureValue = file:ca_catalyst_${_clab}_alt_key.pem
+EOF
+    $OSSL x509 -req $PROV -in "ca_catalyst_${_clab}_req.pem" \
+        -signkey "ca_catalyst_${_clab}_key.pem" -out "ca_catalyst_${_clab}.pem" \
+        -days 3650 -extfile "ca_catalyst_${_clab}.ext"
+    need "ca_catalyst_${_clab}.pem"
+
+    # ICA: issued by Root, alt-signed by ROOT's alt key.
+    rm -f "ica_catalyst_${_clab}.pem" "ica_catalyst_${_clab}_req.pem" "ica_catalyst_${_clab}.ext"
+    $OSSL req -new $PROV -key "ica_catalyst_${_clab}_key.pem" \
+        -out "ica_catalyst_${_clab}_req.pem" -subj "$SUBJ_ICA_P"
+    cat > "ica_catalyst_${_clab}.ext" <<EOF
+basicConstraints = critical,CA:TRUE,pathlen:0
+subjectAltPublicKeyInfo = file:ica_catalyst_${_clab}_alt_pub.pem
+altSignatureAlgorithm = ${_palg}
+altSignatureValue = file:ca_catalyst_${_clab}_alt_key.pem
+EOF
+    $OSSL x509 -req $PROV -in "ica_catalyst_${_clab}_req.pem" \
+        -CA "ca_catalyst_${_clab}.pem" -CAkey "ca_catalyst_${_clab}_key.pem" -CAcreateserial \
+        -out "ica_catalyst_${_clab}.pem" -days 3650 -extfile "ica_catalyst_${_clab}.ext"
+    need "ica_catalyst_${_clab}.pem"
+
+    # LEAF: issued by ICA, alt-signed by ICA's alt key; subjectAltPub = leaf own.
+    rm -f "catalyst_${_clab}_cert.pem" "catalyst_${_clab}_leaf.pem" \
+          "catalyst_${_clab}_req.pem" "catalyst_${_clab}.ext"
+    $OSSL req -new $PROV -key "catalyst_${_clab}_key.pem" \
+        -out "catalyst_${_clab}_req.pem" -subj "$SUBJ_SRV"
+    cat > "catalyst_${_clab}.ext" <<EOF
+basicConstraints = critical,CA:FALSE
+extendedKeyUsage = serverAuth,clientAuth
+subjectAltPublicKeyInfo = file:catalyst_${_clab}_alt_pub.pem
+altSignatureAlgorithm = ${_palg}
+altSignatureValue = file:ica_catalyst_${_clab}_alt_key.pem
+EOF
+    $OSSL x509 -req $PROV -in "catalyst_${_clab}_req.pem" \
+        -CA "ica_catalyst_${_clab}.pem" -CAkey "ica_catalyst_${_clab}_key.pem" -CAcreateserial \
+        -out "catalyst_${_clab}_leaf.pem" -days 3650 -extfile "catalyst_${_clab}.ext"
+    need "catalyst_${_clab}_leaf.pem"
+    cat "catalyst_${_clab}_leaf.pem" "ica_catalyst_${_clab}.pem" > "catalyst_${_clab}_cert.pem"
+    need "catalyst_${_clab}_cert.pem"
+
+    # Runtime needs only: ca_catalyst (trust), catalyst_<clab>_cert (leaf+ICA),
+    # catalyst_<clab>_key (leaf main), catalyst_<clab>_alt_key (leaf PoP).  Drop
+    # the generation-only material (Root/ICA alt private keys, pubs, reqs, exts).
+    rm -f "ca_catalyst_${_clab}_alt_key.pem" "ica_catalyst_${_clab}_alt_key.pem" \
+          "ca_catalyst_${_clab}_alt_pub.pem" "ica_catalyst_${_clab}_alt_pub.pem" \
+          "catalyst_${_clab}_alt_pub.pem" \
+          "ca_catalyst_${_clab}_req.pem" "ica_catalyst_${_clab}_req.pem" "catalyst_${_clab}_req.pem" \
+          "ca_catalyst_${_clab}.ext" "ica_catalyst_${_clab}.ext" "catalyst_${_clab}.ext" \
+          "catalyst_${_clab}_leaf.pem"
+}
+
+# --- Shared classical RSA 3-tier chain ---------------------------------------
+gen_root_ica rsa RSA "$SUBJ_CA_C" "$SUBJ_ICA_C"
+gen_leaf3 RSA rsa server_rsa "$SUBJ_SRV" serverAuth
+gen_leaf3 RSA rsa client_rsa "$SUBJ_CLI" clientAuth
+
+# --- Per-algorithm PQC chain + Catalyst alt-chain ----------------------------
 for alg in $ALGS; do
     echo "=== $alg ==="
     prov=$(prov_name "$alg")   # provider key-type name (genpkey / OID)
-    # PQC CA  (file name = label, genpkey algorithm = provider name)
-    rm -f "ca_${alg}_key.pem" "ca_${alg}.pem"
-    $OSSL genpkey $PROV -algorithm "$prov" -out "ca_${alg}_key.pem"
-    $OSSL req -new -x509 $PROV -key "ca_${alg}_key.pem" -out "ca_${alg}.pem" \
-        -days 3650 -subj "$SUBJ_CA_P"
-    need "ca_${alg}_key.pem" "ca_${alg}.pem"
-    # PQC server + client leaves (issued by the PQC CA)
-    gen_leaf "$prov" "ca_${alg}" "server_${alg}" "$SUBJ_SRV"
-    gen_leaf "$prov" "ca_${alg}" "client_${alg}" "$SUBJ_CLI"
-
-    # Catalyst: RSA leaf carrying the PQC alt key, self alternative-signed.
-    rm -f "catalyst_${alg}_alt_key.pem" "catalyst_${alg}_key.pem" "catalyst_${alg}_cert.pem"
-    $OSSL genpkey $PROV -algorithm "$prov" -out "catalyst_${alg}_alt_key.pem"
-    need "catalyst_${alg}_alt_key.pem"
-    $OSSL pkey $PROV -in "catalyst_${alg}_alt_key.pem" -pubout -out "catalyst_${alg}_alt_pub.pem"
-    $OSSL genpkey $PROV -algorithm RSA -out "catalyst_${alg}_key.pem"
-    need "catalyst_${alg}_key.pem"
-    $OSSL req -new $PROV -key "catalyst_${alg}_key.pem" -out "catalyst_${alg}_req.pem" -subj "$SUBJ_SRV"
-    cat > "catalyst_${alg}.ext" <<EOF
-subjectAltPublicKeyInfo = file:catalyst_${alg}_alt_pub.pem
-altSignatureAlgorithm = ${prov}
-altSignatureValue = file:catalyst_${alg}_alt_key.pem
-EOF
-    $OSSL x509 -req $PROV -in "catalyst_${alg}_req.pem" \
-        -CA ca_rsa.pem -CAkey ca_rsa_key.pem -CAcreateserial \
-        -out "catalyst_${alg}_cert.pem" -days 3650 -extfile "catalyst_${alg}.ext"
-    rm -f "catalyst_${alg}_req.pem" "catalyst_${alg}.ext" "catalyst_${alg}_alt_pub.pem"
-    need "catalyst_${alg}_cert.pem"
+    gen_root_ica "$alg" "$prov" "$SUBJ_CA_P" "$SUBJ_ICA_P"
+    gen_leaf3 "$prov" "$alg" "server_${alg}" "$SUBJ_SRV" serverAuth
+    gen_leaf3 "$prov" "$alg" "client_${alg}" "$SUBJ_CLI" clientAuth
+    gen_catalyst "$alg" "$prov"
 done
 
 # --- Composite single-certificate control ------------------------------------
 # draft-ounsworth-style composite: a SINGLE leaf whose key is an oqsprovider
 # composite sigalg (ECDSA curve paired to the PQC security level).  No alt key,
 # no separate PQC chain -- it is the pure-PQC single-cert wiring with a composite
-# key, so only the ca/server/client leaves are issued (matching build_pure /
+# key, so only the ca/ica/server/client certs are issued (matching build_pure /
 # build_composite in hybrid_fixtures.c).  Labels equal the provider name for
 # ML-DSA / Falcon; for SLH-DSA the label keeps the FIPS-205 slhdsa naming
 # (p256_slhdsasha2128f) while genpkey uses the provider name via prov_name().
@@ -170,38 +259,17 @@ p521_slhdsasha2256s p521_slhdsasha2256f"}
 for clabel in $COMPOSITE_ALGS; do
     echo "=== composite $clabel ==="
     cprov=$(prov_name "$clabel")   # provider sigalg name (genpkey)
-    # Composite CA (file name = label, genpkey algorithm = provider name)
-    rm -f "ca_${clabel}_key.pem" "ca_${clabel}.pem"
-    $OSSL genpkey $PROV -algorithm "$cprov" -out "ca_${clabel}_key.pem"
-    $OSSL req -new -x509 $PROV -key "ca_${clabel}_key.pem" -out "ca_${clabel}.pem" \
-        -days 3650 -subj "$SUBJ_CA_P"
-    need "ca_${clabel}_key.pem" "ca_${clabel}.pem"
-    # Composite server + client leaves (issued by the composite CA)
-    gen_leaf "$cprov" "ca_${clabel}" "server_${clabel}" "$SUBJ_SRV"
-    gen_leaf "$cprov" "ca_${clabel}" "client_${clabel}" "$SUBJ_CLI"
+    gen_root_ica "$clabel" "$cprov" "$SUBJ_CA_P" "$SUBJ_ICA_P"
+    gen_leaf3 "$cprov" "$clabel" "server_${clabel}" "$SUBJ_SRV" serverAuth
+    gen_leaf3 "$cprov" "$clabel" "client_${clabel}" "$SUBJ_CLI" clientAuth
 done
 
 # --- Traditional ECDSA baseline (security-level paired control) --------------
 # P-256 (Cat1), P-384 (Cat3), P-521 (Cat5).  Used by the measurement binary's
 # "traditional" format as the classical-only baseline.
 gen_ecdsa() { # $1=tag $2=curve
-    tag=$1; curve=$2
-    rm -f "ca_ecdsa_${tag}_key.pem" "ca_ecdsa_${tag}.pem" \
-          "ecdsa_${tag}_key.pem" "ecdsa_${tag}_cert.pem"
-    $OSSL genpkey $PROV -algorithm EC -pkeyopt "ec_paramgen_curve:$curve" \
-        -out "ca_ecdsa_${tag}_key.pem"
-    $OSSL req -new -x509 $PROV -key "ca_ecdsa_${tag}_key.pem" \
-        -out "ca_ecdsa_${tag}.pem" -days 3650 -subj "$SUBJ_CA_C"
-    need "ca_ecdsa_${tag}_key.pem" "ca_ecdsa_${tag}.pem"
-    $OSSL genpkey $PROV -algorithm EC -pkeyopt "ec_paramgen_curve:$curve" \
-        -out "ecdsa_${tag}_key.pem"
-    $OSSL req -new $PROV -key "ecdsa_${tag}_key.pem" \
-        -out "ecdsa_${tag}_req.pem" -subj "$SUBJ_SRV"
-    $OSSL x509 -req $PROV -in "ecdsa_${tag}_req.pem" \
-        -CA "ca_ecdsa_${tag}.pem" -CAkey "ca_ecdsa_${tag}_key.pem" \
-        -CAcreateserial -out "ecdsa_${tag}_cert.pem" -days 3650
-    rm -f "ecdsa_${tag}_req.pem"
-    need "ecdsa_${tag}_key.pem" "ecdsa_${tag}_cert.pem"
+    gen_root_ica "ecdsa_$1" "EC:$2" "$SUBJ_CA_C" "$SUBJ_ICA_C"
+    gen_leaf3 "EC:$2" "ecdsa_$1" "ecdsa_$1" "$SUBJ_SRV" serverAuth
 }
 
 gen_ecdsa p256 P-256
@@ -211,31 +279,36 @@ gen_ecdsa p521 P-521
 # --- Final self-check: every expected asset must exist & be non-empty --------
 # This is the backstop against apps/openssl's rc=0-on-failure behaviour: even if
 # a per-step need() were ever missed, no fixture set is declared good unless the
-# complete expected manifest (every bare alg, every composite alg, ECDSA, RSA)
-# is present.  Missing entries are collected and reported together, then fatal.
+# complete expected manifest (every bare alg, every composite alg, ECDSA, RSA,
+# and the 3-tier Root+ICA of each) is present.  Missing entries are collected
+# and reported together, then fatal.
 missing=
 chk() { [ -s "$OUT/$1" ] || missing="$missing $1"; }
+chk_chain() { # $1=pfx  -- Root + ICA + server/client leaf files
+    chk "ca_$1.pem";          chk "ca_$1_key.pem"
+    chk "ica_$1.pem";         chk "ica_$1_key.pem"
+    chk "server_$1_cert.pem"; chk "server_$1_key.pem"
+    chk "client_$1_cert.pem"; chk "client_$1_key.pem"
+}
 for alg in $ALGS; do
-    chk "ca_${alg}.pem";          chk "ca_${alg}_key.pem"
-    chk "server_${alg}_cert.pem"; chk "server_${alg}_key.pem"
-    chk "client_${alg}_cert.pem"; chk "client_${alg}_key.pem"
-    chk "catalyst_${alg}_cert.pem"; chk "catalyst_${alg}_key.pem"
+    chk_chain "$alg"
+    # Catalyst full alt-chain: Root + ICA (public) + leaf (leaf+ICA) + keys.
+    chk "ca_catalyst_${alg}.pem";     chk "ca_catalyst_${alg}_key.pem"
+    chk "ica_catalyst_${alg}.pem";    chk "ica_catalyst_${alg}_key.pem"
+    chk "catalyst_${alg}_cert.pem";   chk "catalyst_${alg}_key.pem"
     chk "catalyst_${alg}_alt_key.pem"
 done
 for clabel in $COMPOSITE_ALGS; do
-    chk "ca_${clabel}.pem";          chk "ca_${clabel}_key.pem"
-    chk "server_${clabel}_cert.pem"; chk "server_${clabel}_key.pem"
-    chk "client_${clabel}_cert.pem"; chk "client_${clabel}_key.pem"
+    chk_chain "$clabel"
 done
 for t in p256 p384 p521; do
-    chk "ca_ecdsa_${t}.pem"; chk "ca_ecdsa_${t}_key.pem"
+    chk "ca_ecdsa_${t}.pem";   chk "ca_ecdsa_${t}_key.pem"
+    chk "ica_ecdsa_${t}.pem";  chk "ica_ecdsa_${t}_key.pem"
     chk "ecdsa_${t}_cert.pem"; chk "ecdsa_${t}_key.pem"
 done
-chk ca_rsa.pem; chk ca_rsa_key.pem
-chk server_rsa_cert.pem; chk server_rsa_key.pem
-chk client_rsa_cert.pem; chk client_rsa_key.pem
+chk_chain rsa
 [ -z "$missing" ] || die "self-check failed; missing/empty fixtures:$missing"
 
-echo "Generated smoke cert assets in $OUT for: $ALGS"
+echo "Generated 3-tier smoke cert assets in $OUT for: $ALGS"
 echo "  composite: $COMPOSITE_ALGS"
-echo "  + ECDSA p256/p384/p521"
+echo "  + ECDSA p256/p384/p521, shared RSA, per-alg Catalyst alt-chain"
