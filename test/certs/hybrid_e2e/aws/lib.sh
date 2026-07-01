@@ -75,11 +75,24 @@ shard_rr() { # $1=shard_id $2=list
 # N=3 concrete layout: isolate the two heaviest SLH-DSA "small" variants (sign
 # ~300 ms) on shard 0, the remaining SLH-DSA on shard 1, and the light majority
 # (ML-DSA, Falcon, ALL composite, ALL ECDSA) on shard 2.
+# N=9 layout: each of the 6 SLH-DSA variants gets its OWN shard (s0-s5) since a
+# bare SLH-DSA runs on 5 PQC formats (the true critical path); the light bare
+# algs (ML-DSA/Falcon) share s6-s8, which also carry the composite labels (1
+# format each) and ECDSA. Heaviest bare-SLH-DSA-small on the lowest shards.
 shard_algs() { # $1=shard_id -> PQC labels for the 5 PQC-using formats
     case "$SHARDS:$1" in
         3:0) echo "slhdsasha2192s slhdsasha2256s" ;;
         3:1) echo "slhdsasha2128s slhdsasha2128f slhdsasha2192f slhdsasha2256f" ;;
         3:2) echo "mldsa44 mldsa65 mldsa87 falcon512 falcon1024" ;;
+        9:0) echo "slhdsasha2256s" ;;
+        9:1) echo "slhdsasha2192s" ;;
+        9:2) echo "slhdsasha2128s" ;;
+        9:3) echo "slhdsasha2256f" ;;
+        9:4) echo "slhdsasha2192f" ;;
+        9:5) echo "slhdsasha2128f" ;;
+        9:6) echo "mldsa87 falcon1024" ;;
+        9:7) echo "mldsa44 mldsa65" ;;
+        9:8) echo "falcon512" ;;
         *)   shard_rr "$1" "$ALL_ALGS" ;;
     esac
 }
@@ -87,6 +100,13 @@ shard_composite() { # $1=shard_id -> composite labels for the composite format
     case "$SHARDS:$1" in
         3:0|3:1) echo "" ;;
         3:2)     echo "$ALL_COMPOSITE" ;;
+        9:0|9:1|9:2) echo "" ;;                       # keep bare-heavy shards lean
+        9:3) echo "p521_slhdsasha2256f" ;;
+        9:4) echo "p384_slhdsasha2192f" ;;
+        9:5) echo "p256_slhdsasha2128f" ;;
+        9:6) echo "p521_slhdsasha2256s p521_mldsa87" ;;
+        9:7) echo "p384_slhdsasha2192s p384_mldsa65" ;;
+        9:8) echo "p256_slhdsasha2128s p256_mldsa44 p256_falcon512 p521_falcon1024" ;;
         *)       shard_rr "$1" "$ALL_COMPOSITE" ;;
     esac
 }
@@ -94,6 +114,8 @@ shard_ecdsa() { # $1=shard_id -> ECDSA tags for the traditional format
     case "$SHARDS:$1" in
         3:0|3:1) echo "" ;;
         3:2)     echo "$ALL_ECDSA" ;;
+        9:6) echo "p256" ;; 9:7) echo "p384" ;; 9:8) echo "p521" ;;
+        9:0|9:1|9:2|9:3|9:4|9:5) echo "" ;;
         *)       shard_rr "$1" "$ALL_ECDSA" ;;
     esac
 }
