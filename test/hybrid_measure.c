@@ -24,7 +24,13 @@
  *                           to the client as a one-line app-data message right
  *                           after the handshake, so a single CSV row carries
  *                           both endpoints' crypto costs.
- *   3. cert_bytes        -- DER length of the peer leaf certificate.
+ *   3. cert_bytes        -- total DER bytes of ALL certificates the server
+ *                           transmitted: the main certificate_list (leaf + ICA;
+ *                           Chameleon base + both ICAs) plus the separate PQC
+ *                           certificate_list (pq_leaf + pq_ICA) for the
+ *                           multi-certificate hybrids.  This is the full 3-tier
+ *                           handshake transmission size, not just the leaf; the
+ *                           Root (trust anchor) is never sent and is excluded.
  *
  * Correctness gating (no fake measurements):
  *   - oqsprovider load is verified at startup; for any PQC format a failure is
@@ -199,6 +205,24 @@ static int client_hybrid_negotiated(SSL *ssl)
     SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(ssl);
 
     return sc != NULL && sc->s3.tmp.hybrid_cert != 0;
+}
+
+/*
+ * Total DER bytes of every certificate in |chain| (0 for NULL/empty).  Used to
+ * size the full transmitted certificate material rather than just the leaf.
+ */
+static long sum_chain_der(STACK_OF(X509) *chain)
+{
+    long total = 0;
+    int i, n = sk_X509_num(chain);
+
+    for (i = 0; i < n; i++) {
+        int len = i2d_X509(sk_X509_value(chain, i), NULL);
+
+        if (len > 0)
+            total += len;
+    }
+    return total;
 }
 
 /* --- provider loading ------------------------------------------------------ */
@@ -417,9 +441,27 @@ static int run_client_once(SSL_CTX *cctx, const char *host, int port,
     out->pq_verify_ms = (double)pv / 1e6;
     out->classical_verify_ms = (double)cv / 1e6;
 
+    /*
+     * cert_bytes = total transmitted certificate bytes (3-tier handshake
+     * transmission overhead), NOT just the leaf.  It sums the DER of every cert
+     * the server sent: the main certificate_list (leaf + ICA; for Chameleon
+     * base + classical ICA + PQC ICA) plus, for the multi-certificate hybrids
+     * (Dual/Related), the separate PQC certificate_list (pq_leaf + pq_ICA).  On
+     * the client SSL_get_peer_cert_chain() includes the leaf; the PQC chain is
+     * kept on the connection as session->peer_pqc_chain.  The Root (trust
+     * anchor) is never transmitted, so it is correctly excluded.
+     */
     peer = SSL_get1_peer_certificate(ssl);
-    if (peer != NULL)
-        out->cert_bytes = i2d_X509(peer, NULL);
+    {
+        SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(ssl);
+        long cb = sum_chain_der(SSL_get_peer_cert_chain(ssl));
+
+        if (sc != NULL && sc->session != NULL)
+            cb += sum_chain_der(sc->session->peer_pqc_chain);
+        if (cb == 0 && peer != NULL)     /* fallback: at least the leaf */
+            cb = i2d_X509(peer, NULL);
+        out->cert_bytes = cb;
+    }
 
     /*
      * Validity gate: the handshake completed AND, for the hybrid formats, a
