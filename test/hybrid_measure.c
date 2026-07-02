@@ -320,6 +320,7 @@ static int run_server(SSL_CTX *sctx, int listen_fd, int runs)
 
     for (i = 0; i < runs; i++) {
         int cfd = accept(listen_fd, NULL, NULL);
+        { int _nd = 1; setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &_nd, sizeof(_nd)); }
         SSL *ssl;
         uint64_t ps = 0, pv = 0, cs = 0, cv = 0;
         char line[96];
