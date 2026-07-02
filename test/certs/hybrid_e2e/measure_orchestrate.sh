@@ -123,14 +123,32 @@ EOF
 }
 
 # ---- tc shaping (client only) ---------------------------------------------
-tc_clear() { tc qdisc del dev "$IFACE" root 2>/dev/null || true; }
+# Bandwidth must limit the DOWNLOAD (server->client) direction, because the TLS
+# certificate flows server->client. A tbf on the client's ROOT qdisc shapes
+# EGRESS (client->server) only, which carries just the tiny ClientHello/ACKs, so
+# it leaves the big cert download unshaped -> bandwidth has no effect (measured
+# bug). We therefore shape the client INGRESS by redirecting it to an IFB device
+# and applying tbf there. Packet loss stays on egress netem (it perturbs the
+# bidirectional TCP flow and is already validated).
+IFB=${IFB:-ifb0}
+tc_clear() {
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc del dev "$IFACE" ingress 2>/dev/null || true
+    tc qdisc del dev "$IFB" root 2>/dev/null || true
+}
 
 tc_apply() { # $1=loss%  $2=bwMbit (0 = none)
     loss=$1; bw=$2
     tc_clear
     if [ "$bw" != 0 ]; then
-        # tbf for bandwidth limiting; burst/latency sized for the link.
-        tc qdisc add dev "$IFACE" root handle 1: tbf \
+        # Download bandwidth limit via IFB ingress redirect.
+        modprobe ifb numifbs=1 2>/dev/null || true
+        ip link add "$IFB" type ifb 2>/dev/null || true   # no-op if it exists
+        ip link set "$IFB" up
+        tc qdisc add dev "$IFACE" handle ffff: ingress
+        tc filter add dev "$IFACE" parent ffff: protocol ip u32 match u32 0 0 \
+            action mirred egress redirect dev "$IFB"
+        tc qdisc add dev "$IFB" root handle 1: tbf \
             rate "${bw}mbit" burst 32kbit latency 400ms
     elif [ "$loss" != 0 ]; then
         tc qdisc add dev "$IFACE" root netem loss "${loss}%"
