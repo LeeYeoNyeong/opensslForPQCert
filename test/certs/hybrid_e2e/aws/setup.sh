@@ -245,7 +245,7 @@ done < <(inst_rows)
 
 # --- verify fixtures are byte-identical across every instance ---------------
 # dual/related formats present TWO certs (classical + PQC), so every CA the
-# verifier trusts (ca_rsa.pem and each ca_<label>.pem) must be byte-identical on
+# verifier trusts (ca_class_<alg>.pem and each ca_<label>.pem) must be byte-identical on
 # all hosts.  But the LEAF certs/keys must match too: a stale or partially
 # pushed leaf -- e.g. composite/SLH-DSA missing on one host because gen_smoke
 # silently skipped it before oqsprovider was rebuilt against the fork -- is

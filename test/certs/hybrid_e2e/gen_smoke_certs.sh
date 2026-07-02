@@ -20,16 +20,20 @@
 #   PQC chain (Dual PQC leaf / Chameleon-delta / Related PQC leaf source / Pure):
 #     ca_<alg>, ica_<alg>, server_<alg>, client_<alg>
 #   Catalyst FULL alternative-signature chain (single-certificate hybrid):
-#     ca_catalyst_<alg>, ica_catalyst_<alg> : RSA CA certs each carrying a PQC
+#     ca_catalyst_<alg>, ica_catalyst_<alg> : ECDSA CA certs each carrying a PQC
 #         alternative key (subjectAltPublicKeyInfo) and an altSignatureValue
 #         signed by the PARENT's alt key (root self-alt-signed).  This forms the
 #         alt-signature chain that X509v3_alt_sig_validate_path() walks.
 #     catalyst_<alg>_cert.pem : leaf (+ ICA) whose altSignatureValue is signed by
 #         the ICA's alt key; subjectAltPublicKeyInfo is the leaf's own alt pubkey.
-#     catalyst_<alg>_key.pem      - RSA main private key
+#     catalyst_<alg>_key.pem      - ECDSA main private key (curve paired to the
+#         PQC alt key's NIST category via cat_curve())
 #     catalyst_<alg>_alt_key.pem  - leaf PQC alt private key (PQCertificateVerify PoP)
-# Shared classical RSA chain (issued once, reused by dual/related/chameleon base):
-#   ca_rsa, ica_rsa, server_rsa, client_rsa
+# Per-algorithm classical ECDSA chain (the traditional component of the
+# dual/related/chameleon hybrids; curve paired to the PQC leaf's NIST category
+# per cat_curve(), matching the composite ECDSA pairing and the paper's stated
+# "ECDSA P-384 with ML-DSA-65"-style pairing):
+#   ca_class_<alg>, ica_class_<alg>, server_class_<alg>, client_class_<alg>
 # Composite single-certificate control chain (per ECDSA-paired composite label):
 #   ca_<clabel>, ica_<clabel>, server_<clabel>, client_<clabel>
 # Traditional ECDSA baseline (per curve tag p256/p384/p521):
@@ -101,6 +105,25 @@ prov_name() { # label -> oqsprovider algorithm name (genpkey / OBJ_txt2obj)
     esac
 }
 
+# cat_curve: map a bare PQC label to the ECDSA curve of its NIST security
+# category, so the *classical* component of a hybrid is paired with an
+# equivalent-strength ECDSA key (as the paper states: "ML-DSA-65 is NIST Cat3,
+# paired with ECDSA P-384").  This is the SAME curve the composite control uses
+# for the corresponding level, keeping catalyst/dual/related/chameleon
+# consistent with composite/traditional.  Unknown labels are fatal so a typo
+# cannot silently fall back to the wrong curve.
+#   Cat1 -> P-256 : mldsa44, falcon512, slhdsa128 (s/f)
+#   Cat3 -> P-384 : mldsa65, slhdsa192 (s/f)
+#   Cat5 -> P-521 : mldsa87, falcon1024, slhdsa256 (s/f)
+cat_curve() { # $1 = bare PQC label
+    case "$1" in
+        mldsa44|falcon512|slhdsasha2128s|slhdsasha2128f)   echo P-256 ;;
+        mldsa65|slhdsasha2192s|slhdsasha2192f)             echo P-384 ;;
+        mldsa87|falcon1024|slhdsasha2256s|slhdsasha2256f)  echo P-521 ;;
+        *) die "cat_curve: no NIST-category ECDSA curve mapping for '$1'" ;;
+    esac
+}
+
 # --- key generation (algspec: RSA | EC:CURVE | <provider-alg>) ----------------
 keygen() { # $1=outfile $2=algspec
     rm -f "$1"
@@ -159,12 +182,13 @@ gen_leaf3() { # $1=algspec $2=ica_pfx $3=leaf_pfx $4=subj $5=eku
 # alt keys on the plain dual/related/chameleon RSA leaves too, which they lack.
 gen_catalyst() { # $1=label $2=provider_alg
     _clab=$1; _palg=$2
+    _ccurve=$(cat_curve "$_clab")   # traditional (main) key: category-paired ECDSA
     for _who in "ca_catalyst_${_clab}" "ica_catalyst_${_clab}" "catalyst_${_clab}"; do
         keygen "${_who}_alt_key.pem" "$_palg"
         rm -f "${_who}_alt_pub.pem"
         $OSSL pkey $PROV -in "${_who}_alt_key.pem" -pubout -out "${_who}_alt_pub.pem"
         need "${_who}_alt_pub.pem"
-        keygen "${_who}_key.pem" RSA
+        keygen "${_who}_key.pem" "EC:$_ccurve"
     done
 
     # ROOT: self-signed CA, alt-signed by its OWN alt key (top self-check).
@@ -227,18 +251,23 @@ EOF
           "catalyst_${_clab}_leaf.pem"
 }
 
-# --- Shared classical RSA 3-tier chain ---------------------------------------
-gen_root_ica rsa RSA "$SUBJ_CA_C" "$SUBJ_ICA_C"
-gen_leaf3 RSA rsa server_rsa "$SUBJ_SRV" serverAuth
-gen_leaf3 RSA rsa client_rsa "$SUBJ_CLI" clientAuth
-
-# --- Per-algorithm PQC chain + Catalyst alt-chain ----------------------------
+# --- Per-algorithm PQC chain + classical ECDSA chain + Catalyst alt-chain -----
+# The classical component of dual/related/chameleon is a dedicated per-algorithm
+# ECDSA 3-tier chain whose curve is paired to the PQC leaf's NIST category
+# (cat_curve()), NOT a single shared RSA chain.  Pairing an equal-strength ECDSA
+# key with each PQC algorithm matches the paper's stated pairing and the
+# composite control's ECDSA-curve selection, and removes the RSA size/perf skew.
 for alg in $ALGS; do
     echo "=== $alg ==="
     prov=$(prov_name "$alg")   # provider key-type name (genpkey / OID)
+    curve=$(cat_curve "$alg")  # category-paired ECDSA curve for the classical side
     gen_root_ica "$alg" "$prov" "$SUBJ_CA_P" "$SUBJ_ICA_P"
     gen_leaf3 "$prov" "$alg" "server_${alg}" "$SUBJ_SRV" serverAuth
     gen_leaf3 "$prov" "$alg" "client_${alg}" "$SUBJ_CLI" clientAuth
+    # Classical ECDSA chain (traditional component of dual/related/chameleon).
+    gen_root_ica "class_${alg}" "EC:$curve" "$SUBJ_CA_C" "$SUBJ_ICA_C"
+    gen_leaf3 "EC:$curve" "class_${alg}" "server_class_${alg}" "$SUBJ_SRV" serverAuth
+    gen_leaf3 "EC:$curve" "class_${alg}" "client_class_${alg}" "$SUBJ_CLI" clientAuth
     gen_catalyst "$alg" "$prov"
 done
 
@@ -292,6 +321,8 @@ chk_chain() { # $1=pfx  -- Root + ICA + server/client leaf files
 }
 for alg in $ALGS; do
     chk_chain "$alg"
+    # Classical ECDSA chain (traditional component of dual/related/chameleon).
+    chk_chain "class_$alg"
     # Catalyst full alt-chain: Root + ICA (public) + leaf (leaf+ICA) + keys.
     chk "ca_catalyst_${alg}.pem";     chk "ca_catalyst_${alg}_key.pem"
     chk "ica_catalyst_${alg}.pem";    chk "ica_catalyst_${alg}_key.pem"
@@ -306,9 +337,9 @@ for t in p256 p384 p521; do
     chk "ica_ecdsa_${t}.pem";  chk "ica_ecdsa_${t}_key.pem"
     chk "ecdsa_${t}_cert.pem"; chk "ecdsa_${t}_key.pem"
 done
-chk_chain rsa
 [ -z "$missing" ] || die "self-check failed; missing/empty fixtures:$missing"
 
 echo "Generated 3-tier smoke cert assets in $OUT for: $ALGS"
 echo "  composite: $COMPOSITE_ALGS"
-echo "  + ECDSA p256/p384/p521, shared RSA, per-alg Catalyst alt-chain"
+echo "  + ECDSA p256/p384/p521 baseline, per-alg classical ECDSA chain,"
+echo "    per-alg Catalyst ECDSA-base alt-chain"

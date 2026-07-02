@@ -2,11 +2,13 @@
 #
 # diag_dual_verify.sh -- no-rebuild diagnostic for the dual cert-verify failure.
 #
-# The measure client fails at statem_clnt.c:2218 = the CLASSICAL (RSA) chain
-# verify (peer_chain leaf -> ca_rsa). That step is provider/RTT-independent and
-# deterministic, so a per-host failure means one INPUT differs on the failing
-# pair: the RSA leaf bytes the server sends, the client's trust anchor, or the
-# verify-time clock. This script checks all three without pushing/rebuilding.
+# The measure client fails at statem_clnt.c:2218 = the CLASSICAL (ECDSA) chain
+# verify (peer_chain leaf -> ca_class_<alg>). That step is provider/RTT-
+# independent and deterministic, so a per-host failure means one INPUT differs
+# on the failing pair: the classical leaf bytes the server sends, the client's
+# trust anchor, or the verify-time clock. This script checks all three without
+# pushing/rebuilding.  (dual's classical component is a per-algorithm ECDSA
+# chain, curve category-paired to the PQC leaf; mldsa65 -> P-384.)
 #
 # Usage: ./diag_dual_verify.sh [pair]   (default: tokyo)
 set -euo pipefail
@@ -23,8 +25,8 @@ SIP="$(inst_field "$PAIR" "$SHARD" server public_ip)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 log "pair=$PAIR  client=$CIP  server=$SIP"
 
-# --- 1. fixture md5 on both hosts (RSA = dual classical; MLDSA = dual PQC) ---
-FILES="ca_rsa.pem server_rsa_cert.pem server_rsa_key.pem ca_mldsa65.pem server_mldsa65_cert.pem"
+# --- 1. fixture md5 on both hosts (ECDSA = dual classical; MLDSA = dual PQC) --
+FILES="ca_class_mldsa65.pem server_class_mldsa65_cert.pem server_class_mldsa65_key.pem ca_mldsa65.pem server_mldsa65_cert.pem"
 echo "===== [1] fixture md5 (client vs server) ====="
 printf '%-26s %-34s %-34s %s\n' FILE CLIENT SERVER MATCH
 for f in $FILES; do
@@ -35,22 +37,22 @@ for f in $FILES; do
     printf '%-26s %-34s %-34s %s\n' "$f" "$cm" "$sm" "$m"
 done
 
-# --- 2. cross-verify: does the SERVER's RSA leaf chain to the CLIENT's CA? ---
+# --- 2. cross-verify: does the SERVER's classical leaf chain to CLIENT's CA? -
 # This is exactly what statem_clnt.c:2218 does. Pull both, verify with the
-# default provider only (RSA needs no oqsprovider).
+# default provider only (ECDSA needs no oqsprovider).
 echo
 echo "===== [2] cross cert-chain verify (server leaf vs client CA) ====="
-scp_from "$CIP" "$SMOKE/ca_rsa.pem"          "$TMP/client_ca_rsa.pem"
-scp_from "$SIP" "$SMOKE/server_rsa_cert.pem" "$TMP/server_rsa_cert.pem"
+scp_from "$CIP" "$SMOKE/ca_class_mldsa65.pem"          "$TMP/client_ca_class.pem"
+scp_from "$SIP" "$SMOKE/server_class_mldsa65_cert.pem" "$TMP/server_class_cert.pem"
 OSSL="${OPENSSL:-openssl}"
 echo "-- server leaf identity (as served) --"
-$OSSL x509 -in "$TMP/server_rsa_cert.pem" -noout -subject -issuer -dates \
+$OSSL x509 -in "$TMP/server_class_cert.pem" -noout -subject -issuer -dates \
     -fingerprint -sha256 || true
-echo "-- openssl verify -CAfile <client ca_rsa> <server leaf> --"
-if $OSSL verify -CAfile "$TMP/client_ca_rsa.pem" "$TMP/server_rsa_cert.pem"; then
-    echo "VERDICT[2]: server RSA leaf DOES chain to client ca_rsa -> H1 (leaf skew) refuted"
+echo "-- openssl verify -CAfile <client ca_class> <server leaf> --"
+if $OSSL verify -CAfile "$TMP/client_ca_class.pem" "$TMP/server_class_cert.pem"; then
+    echo "VERDICT[2]: server classical leaf DOES chain to client ca_class -> H1 (leaf skew) refuted"
 else
-    echo "VERDICT[2]: server RSA leaf does NOT verify against client ca_rsa -> H1 CONFIRMED (fixture/CA skew)"
+    echo "VERDICT[2]: server classical leaf does NOT verify against client ca_class -> H1 CONFIRMED (fixture/CA skew)"
 fi
 
 # --- 3. clock skew (verify uses the client's wall clock) ---------------------

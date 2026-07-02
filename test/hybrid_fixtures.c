@@ -209,24 +209,30 @@ static int add_basic_constraints(X509 *x)
 static int build_dual(const char *pq, const char *cd,
                       SSL_CTX **sctx, SSL_CTX **cctx)
 {
-    char nb[160], kb[160], cab[160];
-    char *scert = cert_path(cd, "server_rsa_cert.pem");
-    char *skey = cert_path(cd, "server_rsa_key.pem");
-    char *carsa = cert_path(cd, "ca_rsa.pem");
+    char nb[160], kb[160], cab[160], sb[160], skb[160], ccb[160];
+    /*
+     * The classical component is a per-algorithm ECDSA chain whose curve is
+     * paired to the PQC leaf's NIST category (server_class_<alg> /
+     * ca_class_<alg>), produced by gen_smoke_certs.sh's cat_curve() -- not a
+     * shared RSA chain.
+     */
+    char *scert = cert_path(cd, af(sb, sizeof(sb), "server_class_%s_cert.pem", pq));
+    char *skey = cert_path(cd, af(skb, sizeof(skb), "server_class_%s_key.pem", pq));
+    char *caclass = cert_path(cd, af(ccb, sizeof(ccb), "ca_class_%s.pem", pq));
     X509 *pqcert = load_cert(cd, af(nb, sizeof(nb), "server_%s_cert.pem", pq));
     EVP_PKEY *pqkey = load_key(cd, af(kb, sizeof(kb), "server_%s_key.pem", pq));
     X509_STORE *pqstore = trust_store(cd, af(cab, sizeof(cab), "ca_%s.pem", pq));
     STACK_OF(X509) *pqchain = pq_ica_chain(cd, pq);   /* pq leaf's ICA (transmitted) */
     int ok = 0;
 
-    if (scert == NULL || skey == NULL || carsa == NULL
+    if (scert == NULL || skey == NULL || caclass == NULL
             || pqcert == NULL || pqkey == NULL || pqstore == NULL || pqchain == NULL)
         goto end;
 
     if (!hf_ctx_pair(sctx, cctx, scert, skey))
         goto end;
 
-    if (!SSL_CTX_load_verify_file(*cctx, carsa))
+    if (!SSL_CTX_load_verify_file(*cctx, caclass))
         goto end;
     SSL_CTX_set_verify(*cctx, SSL_VERIFY_PEER, NULL);
 
@@ -242,7 +248,7 @@ static int build_dual(const char *pq, const char *cd,
  end:
     OPENSSL_free(scert);
     OPENSSL_free(skey);
-    OPENSSL_free(carsa);
+    OPENSSL_free(caclass);
     X509_free(pqcert);
     EVP_PKEY_free(pqkey);
     X509_STORE_free(pqstore);
@@ -261,8 +267,10 @@ static int build_catalyst(const char *pq, const char *cd,
     EVP_PKEY *altkey = load_key(cd, af(ab, sizeof(ab), "catalyst_%s_alt_key.pem", pq));
     /*
      * 3-tier Catalyst: the whole chain (Root/ICA/Leaf) is Catalyst certs, so the
-     * client's trust anchor is the dedicated Catalyst Root -- NOT the shared
-     * plain ca_rsa (which has no alternative key).  hf_ctx_pair loads
+     * client's trust anchor is the dedicated Catalyst Root -- NOT the plain
+     * per-algorithm ECDSA class chain (which has no alternative key).  The
+     * Catalyst chain's own main keys are ECDSA too (category-paired), but each
+     * cert additionally carries the PQC alt key.  hf_ctx_pair loads
      * catalyst_<alg>_cert.pem (= leaf + ICA) with the chain loader, so the server
      * transmits leaf + ICA and X509v3_alt_sig_validate_path walks
      * leaf -> ICA -> Root alternative signatures up to this Root.
@@ -297,8 +305,13 @@ static int build_catalyst(const char *pq, const char *cd,
     return ok;
 }
 
-/* Chameleon Base = RSA leaf carrying a deltaCertificateDescriptor for the Delta. */
-static X509 *make_chameleon_base(X509 *ca_rsa, EVP_PKEY *ca_rsa_key,
+/*
+ * Chameleon Base = classical (ECDSA) leaf carrying a deltaCertificateDescriptor
+ * for the Delta.  |ca_cl|/|ca_cl_key| are the issuing classical ICA cert/key
+ * (ECDSA, category-paired to the Delta PQC key); |base_main| is the Base's own
+ * classical (ECDSA) key.
+ */
+static X509 *make_chameleon_base(X509 *ca_cl, EVP_PKEY *ca_cl_key,
                                  X509 *ca_pq, EVP_PKEY *ca_pq_key,
                                  EVP_PKEY *base_main, EVP_PKEY *delta_pq)
 {
@@ -323,10 +336,10 @@ static X509 *make_chameleon_base(X509 *ca_rsa, EVP_PKEY *ca_rsa_key,
             || !ASN1_INTEGER_set(X509_get_serialNumber(base), 1001)
             || !X509_set1_notBefore(base, nb) || !X509_set1_notAfter(base, na)
             || !X509_set_subject_name(base, subj)
-            || !X509_set_issuer_name(base, X509_get_subject_name(ca_rsa))
+            || !X509_set_issuer_name(base, X509_get_subject_name(ca_cl))
             || !X509_set_pubkey(base, base_main)
             || !add_basic_constraints(base)
-            || X509_sign(base, ca_rsa_key, EVP_sha256()) == 0)
+            || X509_sign(base, ca_cl_key, EVP_sha256()) == 0)
         goto end;
 
     /* Delta: PQC key, issued by the PQC CA, PQ signature (md = NULL). */
@@ -349,7 +362,7 @@ static X509 *make_chameleon_base(X509 *ca_rsa, EVP_PKEY *ca_rsa_key,
                                       0, dcd_oct);
     if (base_dcd == NULL || de == NULL
             || !X509_add_ext(base_dcd, de, -1)
-            || X509_sign(base_dcd, ca_rsa_key, EVP_sha256()) == 0)
+            || X509_sign(base_dcd, ca_cl_key, EVP_sha256()) == 0)
         goto end;
 
     ret = base_dcd;
@@ -370,30 +383,36 @@ static int build_chameleon(const char *pq, const char *cd,
                            SSL_CTX **sctx, SSL_CTX **cctx)
 {
     char icab[160], ikb[160], dkb[160], pqcab[160];
-    char *scert = cert_path(cd, "server_rsa_cert.pem");
-    char *skey = cert_path(cd, "server_rsa_key.pem");
-    char *carsa = cert_path(cd, "ca_rsa.pem");
+    char sb[160], skb[160], ccb[160], cikb[160], cikkb[160];
+    /*
+     * The classical Base leaf and its issuing ICA are a per-algorithm ECDSA
+     * chain (curve paired to the Delta PQC key's NIST category via
+     * gen_smoke_certs.sh's cat_curve()), not a shared RSA chain.
+     */
+    char *scert = cert_path(cd, af(sb, sizeof(sb), "server_class_%s_cert.pem", pq));
+    char *skey = cert_path(cd, af(skb, sizeof(skb), "server_class_%s_key.pem", pq));
+    char *caclass = cert_path(cd, af(ccb, sizeof(ccb), "ca_class_%s.pem", pq));
     /*
      * 3-tier: the Base is issued by the classical ICA and the reconstructed
      * Delta by the PQC ICA.  make_chameleon_base() takes the *issuing* CA cert
      * and key for each side -- here the two ICAs, not the Roots.
      */
-    X509 *ica_rsa = load_cert(cd, "ica_rsa.pem");
-    EVP_PKEY *ica_rsa_key = load_key(cd, "ica_rsa_key.pem");
+    X509 *ica_cl = load_cert(cd, af(cikb, sizeof(cikb), "ica_class_%s.pem", pq));
+    EVP_PKEY *ica_cl_key = load_key(cd, af(cikkb, sizeof(cikkb), "ica_class_%s_key.pem", pq));
     X509 *ica_pq = load_cert(cd, af(icab, sizeof(icab), "ica_%s.pem", pq));
     EVP_PKEY *ica_pq_key = load_key(cd, af(ikb, sizeof(ikb), "ica_%s_key.pem", pq));
-    EVP_PKEY *base_main = load_key(cd, "server_rsa_key.pem");
+    EVP_PKEY *base_main = load_key(cd, af(skb, sizeof(skb), "server_class_%s_key.pem", pq));
     EVP_PKEY *delta_key = load_key(cd, af(dkb, sizeof(dkb), "server_%s_key.pem", pq));
     X509 *base = NULL;
     X509_STORE *pqstore = NULL;
     int ok = 0;
 
-    if (scert == NULL || skey == NULL || carsa == NULL
-            || ica_rsa == NULL || ica_rsa_key == NULL || ica_pq == NULL
+    if (scert == NULL || skey == NULL || caclass == NULL
+            || ica_cl == NULL || ica_cl_key == NULL || ica_pq == NULL
             || ica_pq_key == NULL || base_main == NULL || delta_key == NULL)
         goto end;
 
-    base = make_chameleon_base(ica_rsa, ica_rsa_key, ica_pq, ica_pq_key,
+    base = make_chameleon_base(ica_cl, ica_cl_key, ica_pq, ica_pq_key,
                                base_main, delta_key);
     if (base == NULL)
         goto end;
@@ -403,7 +422,7 @@ static int build_chameleon(const char *pq, const char *cd,
 
     /*
      * Present the single Base leaf, and transmit BOTH intermediates in the main
-     * certificate_list: the classical ICA (so Base -> rsa_ICA -> rsa_Root
+     * certificate_list: the classical ICA (so Base -> class_ICA -> class_Root
      * verifies) and the PQC ICA (so the reconstructed Delta -> pq_ICA -> pq_Root
      * verifies -- ssl_verify_chameleon_dcd feeds peer_chain\{Base} as untrusted
      * intermediates).  Clear the leftover chain from hf_ctx_pair first.
@@ -411,11 +430,11 @@ static int build_chameleon(const char *pq, const char *cd,
     if (!SSL_CTX_use_certificate(*sctx, base)
             || !SSL_CTX_use_PrivateKey(*sctx, base_main)
             || !SSL_CTX_clear_chain_certs(*sctx)
-            || !SSL_CTX_add1_chain_cert(*sctx, ica_rsa)
+            || !SSL_CTX_add1_chain_cert(*sctx, ica_cl)
             || !SSL_CTX_add1_chain_cert(*sctx, ica_pq))
         goto end;
 
-    if (!SSL_CTX_load_verify_file(*cctx, carsa))
+    if (!SSL_CTX_load_verify_file(*cctx, caclass))
         goto end;
     SSL_CTX_set_verify(*cctx, SSL_VERIFY_PEER, NULL);
 
@@ -433,9 +452,9 @@ static int build_chameleon(const char *pq, const char *cd,
  end:
     OPENSSL_free(scert);
     OPENSSL_free(skey);
-    OPENSSL_free(carsa);
-    X509_free(ica_rsa);
-    EVP_PKEY_free(ica_rsa_key);
+    OPENSSL_free(caclass);
+    X509_free(ica_cl);
+    EVP_PKEY_free(ica_cl_key);
     X509_free(ica_pq);
     EVP_PKEY_free(ica_pq_key);
     EVP_PKEY_free(base_main);
@@ -491,10 +510,16 @@ static int build_related(const char *pq, const char *cd,
                          SSL_CTX **sctx, SSL_CTX **cctx)
 {
     char icab[160], ikb[160], pkb[160], pqcab[160];
-    char *scert = cert_path(cd, "server_rsa_cert.pem");
-    char *skey = cert_path(cd, "server_rsa_key.pem");
-    char *carsa = cert_path(cd, "ca_rsa.pem");
-    X509 *classical = load_cert(cd, "server_rsa_cert.pem");
+    char sb[160], skb[160], ccb[160], clb[160];
+    /*
+     * The classical (transmitted) leaf the RFC 9763 RelatedCertificate binds to
+     * is a per-algorithm ECDSA chain (curve paired to the PQC leaf's NIST
+     * category via gen_smoke_certs.sh's cat_curve()), not a shared RSA chain.
+     */
+    char *scert = cert_path(cd, af(sb, sizeof(sb), "server_class_%s_cert.pem", pq));
+    char *skey = cert_path(cd, af(skb, sizeof(skb), "server_class_%s_key.pem", pq));
+    char *caclass = cert_path(cd, af(ccb, sizeof(ccb), "ca_class_%s.pem", pq));
+    X509 *classical = load_cert(cd, af(clb, sizeof(clb), "server_class_%s_cert.pem", pq));
     /* 3-tier: the PQC leaf is issued by the PQC ICA (not the Root). */
     X509 *ica_pq = load_cert(cd, af(icab, sizeof(icab), "ica_%s.pem", pq));
     EVP_PKEY *ica_pq_key = load_key(cd, af(ikb, sizeof(ikb), "ica_%s_key.pem", pq));
@@ -504,7 +529,7 @@ static int build_related(const char *pq, const char *cd,
     X509_STORE *pqstore = NULL;
     int ok = 0;
 
-    if (scert == NULL || skey == NULL || carsa == NULL
+    if (scert == NULL || skey == NULL || caclass == NULL
             || classical == NULL || ica_pq == NULL
             || ica_pq_key == NULL || pqc_key == NULL || pqchain == NULL)
         goto end;
@@ -522,7 +547,7 @@ static int build_related(const char *pq, const char *cd,
             || !SSL_CTX_set_pq_certificate(*sctx, pqc, pqc_key, pqchain))
         goto end;
 
-    if (!SSL_CTX_load_verify_file(*cctx, carsa))
+    if (!SSL_CTX_load_verify_file(*cctx, caclass))
         goto end;
     SSL_CTX_set_verify(*cctx, SSL_VERIFY_PEER, NULL);
     pqstore = trust_store(cd, af(pqcab, sizeof(pqcab), "ca_%s.pem", pq));
@@ -535,7 +560,7 @@ static int build_related(const char *pq, const char *cd,
  end:
     OPENSSL_free(scert);
     OPENSSL_free(skey);
-    OPENSSL_free(carsa);
+    OPENSSL_free(caclass);
     X509_free(classical);
     X509_free(ica_pq);
     EVP_PKEY_free(ica_pq_key);
