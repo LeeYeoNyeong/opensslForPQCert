@@ -172,47 +172,74 @@ emit() { # role pair shard region id public private
     printf '%s\n' "${ITEMS[@]}" | jq -s '.' > "$INSTANCES_JSON"
 }
 
-# If provisioning aborts after launching instances, point the operator at a
-# tag-based emergency cleanup (the manifest may be partial).
+# If provisioning aborts after launching instances, TERMINATE what we launched
+# so a killed/interrupted provision never leaks a partial paying fleet.  This is
+# safe: the trap is disarmed once the full fleet is up and recorded.  A hard
+# SIGKILL cannot run this, so it also prints the manual tag-sweep as a backstop.
 emergency() {
     echo >&2
-    echo "!! provision interrupted -- instances may be running. Check $INSTANCES_JSON," >&2
-    echo "!! run ./teardown.sh, and/or sweep by tag in each region:" >&2
+    echo "!! provision interrupted -- terminating any instances launched so far ..." >&2
     for r in $(all_regions); do
-        echo "   aws ec2 describe-instances --region $r \\" >&2
-        echo "     --filters Name=tag:Project,Values=$PROJECT Name=instance-state-name,Values=running,pending \\" >&2
-        echo "     --query 'Reservations[].Instances[].InstanceId' --output text" >&2
+        ids=$(aws ec2 describe-instances --region "$r" \
+                --filters "Name=tag:Project,Values=$PROJECT" \
+                          "Name=instance-state-name,Values=running,pending" \
+                --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null | tr '\t' '\n')
+        for id in $ids; do
+            [ -n "$id" ] && aws ec2 terminate-instances --region "$r" --instance-ids "$id" >/dev/null 2>&1 && \
+                echo "   [$r] terminated $id" >&2
+        done
     done
+    echo "!! done. Verify with: ./teardown.sh (or the per-region tag sweep)" >&2
 }
 trap emergency ERR INT TERM
 
-# --- 2. launch the SHARDS x 3 clients (Seoul) and record them ---------------
-# Client IPs are read back from the manifest (inst_field) in phase 3, so no
-# associative array is needed (system bash is 3.2).
+# --- 2. launch ALL clients (Seoul) non-blocking, then batch-wait ------------
+# Launching 3*SHARDS instances one-at-a-time with a blocking wait each is far too
+# slow for large SHARDS (and long enough to be killed mid-run).  Fire all the
+# run-instances first, then wait for the whole batch in ONE call so the total is
+# ~one instance's boot time, not the sum.
+CLIENT_IDS=(); CLIENT_TAGS=()
 for pair in $PAIRS; do
     for shard in $(shard_ids); do
         cid=$(launch "$CLIENT_REGION" "$CLIENT_SG" "$CLIENT_AMI" client "$pair" "$shard")
-        log "launched client/$pair/s$shard = $cid (Seoul); waiting for running ..."
-        read -r pub priv < <(wait_running_ip "$CLIENT_REGION" "$cid")
-        log "client/$pair/s$shard up: public=$pub private=$priv"
-        emit client "$pair" "$shard" "$CLIENT_REGION" "$cid" "$pub" "$priv"
+        log "launched client/$pair/s$shard = $cid (Seoul)"
+        CLIENT_IDS+=("$cid"); CLIENT_TAGS+=("$pair $shard")
     done
 done
+log "waiting for ${#CLIENT_IDS[@]} Seoul clients to reach running (batch) ..."
+aws ec2 wait instance-running --region "$CLIENT_REGION" --instance-ids "${CLIENT_IDS[@]}"
+for i in "${!CLIENT_IDS[@]}"; do
+    set -- ${CLIENT_TAGS[$i]}; p="$1"; s="$2"
+    read -r pub priv < <(aws ec2 describe-instances --region "$CLIENT_REGION" \
+        --instance-ids "${CLIENT_IDS[$i]}" \
+        --query 'Reservations[0].Instances[0].[PublicIpAddress,PrivateIpAddress]' --output text)
+    log "client/$p/s$s up: public=$pub private=$priv"
+    emit client "$p" "$s" "$CLIENT_REGION" "${CLIENT_IDS[$i]}" "$pub" "$priv"
+done
 
-# --- 3. per server region: SG + open port from EACH shard client, then launch
+# --- 3. per server region: open ports from every shard client, launch, wait --
 for pair in $PAIRS; do
     sreg=$(server_region_for_pair "$pair")
     ssg=$(ensure_sg "$sreg")
     sami=$(latest_ami "$sreg")
     clear_port_rules "$sreg" "$ssg"         # wipe stale rules once, then add all shards
+    SIDS=(); STAGS=()
     for shard in $(shard_ids); do
         cip=$(inst_field "$pair" "$shard" client public_ip)
         authorize_port "$sreg" "$ssg" "$cip"
-        log "[$sreg] SG=$ssg AMI=$sami ; launching server/$pair/s$shard ..."
         sid=$(launch "$sreg" "$ssg" "$sami" server "$pair" "$shard")
-        read -r pub priv < <(wait_running_ip "$sreg" "$sid")
-        log "server/$pair/s$shard up: public=$pub private=$priv"
-        emit server "$pair" "$shard" "$sreg" "$sid" "$pub" "$priv"
+        log "[$sreg] launched server/$pair/s$shard = $sid"
+        SIDS+=("$sid"); STAGS+=("$shard")
+    done
+    log "[$sreg] waiting for ${#SIDS[@]} servers to reach running (batch) ..."
+    aws ec2 wait instance-running --region "$sreg" --instance-ids "${SIDS[@]}"
+    for i in "${!SIDS[@]}"; do
+        s="${STAGS[$i]}"
+        read -r pub priv < <(aws ec2 describe-instances --region "$sreg" \
+            --instance-ids "${SIDS[$i]}" \
+            --query 'Reservations[0].Instances[0].[PublicIpAddress,PrivateIpAddress]' --output text)
+        log "server/$pair/s$s up: public=$pub private=$priv"
+        emit server "$pair" "$s" "$sreg" "${SIDS[$i]}" "$pub" "$priv"
     done
 done
 

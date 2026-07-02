@@ -237,7 +237,10 @@ while IFS=$'\t' read -r pair shard role region id pub priv; do
     [ "$pub" = "$GEN_IP" ] && { log "skip fixture push to generator ($role/$pair/s$shard)"; continue; }
     log "pushing fixtures -> $role/$pair/s$shard ($pub)"
     scp_to "$pub" "$AWS_DIR/smoke.tgz" "/tmp/smoke.tgz"
-    ssh_to "$pub" "tar xzf /tmp/smoke.tgz -C $REMOTE_HYBRID"
+    # </dev/null: ssh must NOT read this while-loop's stdin (the inst_rows
+    # process substitution) or it consumes the remaining rows and the loop
+    # stops after ONE instance -- fixtures then never reach the rest.
+    ssh_to "$pub" "tar xzf /tmp/smoke.tgz -C $REMOTE_HYBRID" </dev/null
 done < <(inst_rows)
 
 # --- verify fixtures are byte-identical across every instance ---------------
@@ -253,8 +256,11 @@ done < <(inst_rows)
 log "verifying fixtures (CA + leaf certs/keys) are byte-identical across all instances"
 FX_REF=""; FX_REF_NAME=""; FX_REF_N=""
 while IFS=$'\t' read -r pair shard role region id pub priv; do
+    # </dev/null on ssh: same stdin-consumption guard as the push loop above --
+    # without it this verification loop would also stop after one instance and
+    # silently declare "uniform" while never checking the rest.
     read -r sum nfiles < <(ssh_to "$pub" "cd $REMOTE_HYBRID/smoke && \
-        n=\$(ls *.pem | wc -l | tr -d ' '); d=\$(md5sum *.pem | sort | md5sum | cut -d' ' -f1); echo \$d \$n") \
+        n=\$(ls *.pem | wc -l | tr -d ' '); d=\$(md5sum *.pem | sort | md5sum | cut -d' ' -f1); echo \$d \$n" </dev/null) \
         || die "could not read fixtures on $role/$pair/s$shard ($pub) -- fixture push failed?"
     if [ -z "$FX_REF" ]; then
         FX_REF="$sum"; FX_REF_NAME="$role/$pair/s$shard"; FX_REF_N="$nfiles"
