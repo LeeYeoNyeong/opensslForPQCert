@@ -264,3 +264,26 @@ CLAUDE.md
 .claude/
 .omc/
 reviews.db
+
+# Local session/analysis scratch notes (kept locally as README source material,
+# not part of the public artifact). Explicit names only -- do NOT use *.md,
+# which would also ignore the tracked README.md and measurement docs.
+/branch_analysis_result.md
+/cert_chain_state.md
+/fix_chain_and_parallelize_plan.md
+/fix_measure_client_verify_analysis.md
+/implementation_details.md
+/integrate_build_fixes_report.md
+/library_versions.md
+/loc_report.md
+/measure_harness_report.md
+/measure_prep_algos_report.md
+/phase4b_step4_report.md
+/phase4b_step5_report.md
+/phase4c_report.md
+/phase4d_report.md
+/phase4e_report.md
+/phase4e_status.md
+/phase4f_hygiene_diagnosis.md
+/phase4f_report.md
+/session_progress.md
