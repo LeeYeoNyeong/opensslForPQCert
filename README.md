@@ -1,477 +1,234 @@
-Welcome to the OpenSSL Project
-==============================
-
-[![openssl logo]][www.openssl.org]
-
-[![github actions ci badge]][github actions ci]
-[![appveyor badge]][appveyor jobs]
-
-OpenSSL is a robust, commercial-grade, full-featured Open Source Toolkit
-for the TLS (formerly SSL), DTLS and QUIC (currently client side only)
-protocols.
-
-The protocol implementations are based on a full-strength general purpose
-cryptographic library, which can also be used stand-alone. Also included is a
-cryptographic module validated to conform with FIPS standards.
-
-OpenSSL is descended from the SSLeay library developed by Eric A. Young
-and Tim J. Hudson.
-
-The official Home Page of the OpenSSL Project is [www.openssl.org].
-
-Table of Contents
-=================
-
- - [Overview](#overview)
- - [Download](#download)
- - [Build and Install](#build-and-install)
- - [Documentation](#documentation)
- - [License](#license)
- - [Support](#support)
- - [Contributing](#contributing)
- - [Legalities](#legalities)
-
-Overview
-========
-
-The OpenSSL toolkit includes:
-
-- **libssl**
-  an implementation of all TLS protocol versions up to TLSv1.3 ([RFC 8446]),
-  DTLS protocol versions up to DTLSv1.2 ([RFC 6347]) and
-  the QUIC (currently client side only) version 1 protocol ([RFC 9000]).
-
-- **libcrypto**
-  a full-strength general purpose cryptographic library. It constitutes the
-  basis of the TLS implementation, but can also be used independently.
-
-- **openssl**
-  the OpenSSL command line tool, a swiss army knife for cryptographic tasks,
-  testing and analyzing. It can be used for
-  - creation of key parameters
-  - creation of X.509 certificates, CSRs and CRLs
-  - calculation of message digests
-  - encryption and decryption
-  - SSL/TLS/DTLS and client and server tests
-  - QUIC client tests
-  - handling of S/MIME signed or encrypted mail
-  - and more...
-
-Download
-========
-
-For Production Use
-------------------
-
-Source code tarballs of the official releases can be downloaded from
-[openssl-library.org/source/](https://openssl-library.org/source/).
-The OpenSSL project does not distribute the toolkit in binary form.
-
-However, for a large variety of operating systems precompiled versions
-of the OpenSSL toolkit are available. In particular, on Linux and other
-Unix operating systems, it is normally recommended to link against the
-precompiled shared libraries provided by the distributor or vendor.
-
-We also maintain a list of third parties that produce OpenSSL binaries for
-various Operating Systems (including Windows) on the [Binaries] page on our
-wiki.
-
-For Testing and Development
----------------------------
-
-Although testing and development could in theory also be done using
-the source tarballs, having a local copy of the git repository with
-the entire project history gives you much more insight into the
-code base.
-
-The main OpenSSL Git repository is private.
-There is a public GitHub mirror of it at [github.com/openssl/openssl],
-which is updated automatically from the former on every commit.
-
-A local copy of the Git repository can be obtained by cloning it from
-the GitHub mirror using
-
-    git clone https://github.com/openssl/openssl.git
-
-If you intend to contribute to OpenSSL, either to fix bugs or contribute
-new features, you need to fork the GitHub mirror and clone your public fork
-instead.
-
-    git clone https://github.com/yourname/openssl.git
-
-This is necessary because all development of OpenSSL nowadays is done via
-GitHub pull requests. For more details, see [Contributing](#contributing).
-
-Build and Install
-=================
-
-After obtaining the Source, have a look at the [INSTALL](INSTALL.md) file for
-detailed instructions about building and installing OpenSSL. For some
-platforms, the installation instructions are amended by a platform specific
-document.
-
- * [Notes for UNIX-like platforms](NOTES-UNIX.md)
- * [Notes for Android platforms](NOTES-ANDROID.md)
- * [Notes for Windows platforms](NOTES-WINDOWS.md)
- * [Notes for the DOS platform with DJGPP](NOTES-DJGPP.md)
- * [Notes for the OpenVMS platform](NOTES-VMS.md)
- * [Notes on Perl](NOTES-PERL.md)
- * [Notes on Valgrind](NOTES-VALGRIND.md)
-
-Specific notes on upgrading to OpenSSL 3.x from previous versions can be found
-in the [ossl-guide-migration(7ossl)] manual page.
-
-Documentation
-=============
-
-README Files
-------------
-
-There are some README.md files in the top level of the source distribution
-containing additional information on specific topics.
-
- * [Information about the OpenSSL QUIC protocol implementation](README-QUIC.md)
- * [Information about the OpenSSL Provider architecture](README-PROVIDERS.md)
- * [Information about using the OpenSSL FIPS validated module](README-FIPS.md)
- * [Information about the legacy OpenSSL Engine architecture](README-ENGINES.md)
-
-The OpenSSL Guide
------------------
-
-There are some tutorial and introductory pages on some important OpenSSL topics
-within the [OpenSSL Guide].
-
-Manual Pages
-------------
-
-The manual pages for the master branch and all current stable releases are
-available online.
-
-- [OpenSSL master](https://www.openssl.org/docs/manmaster)
-- [OpenSSL 3.0](https://www.openssl.org/docs/man3.0)
-- [OpenSSL 3.1](https://www.openssl.org/docs/man3.1)
-- [OpenSSL 3.2](https://www.openssl.org/docs/man3.2)
-
-Demos
------
-
-There are numerous source code demos for using various OpenSSL capabilities in the
-[demos subfolder](./demos).
-
-Wiki
-----
-
-There is a [GitHub Wiki] which is currently not very active.
-
-License
-=======
-
-OpenSSL is licensed under the Apache License 2.0, which means that
-you are free to get and use it for commercial and non-commercial
-purposes as long as you fulfill its conditions.
-
-See the [LICENSE.txt](LICENSE.txt) file for more details.
-
-Support
-=======
-
-There are various ways to get in touch. The correct channel depends on
-your requirement. See the [SUPPORT](SUPPORT.md) file for more details.
-
-Contributing
-============
-
-If you are interested and willing to contribute to the OpenSSL project,
-please take a look at the [CONTRIBUTING](CONTRIBUTING.md) file.
-
-Legalities
-==========
-
-A number of nations restrict the use or export of cryptography. If you are
-potentially subject to such restrictions, you should seek legal advice before
-attempting to develop or distribute cryptographic code.
-
-Copyright
-=========
-
-Copyright (c) 1998-2025 The OpenSSL Project Authors
-
-Copyright (c) 1995-1998 Eric A. Young, Tim J. Hudson
-
-All rights reserved.
-
-<!-- Links  -->
-
-[www.openssl.org]:
-    <https://www.openssl.org>
-    "OpenSSL Homepage"
-
-[github.com/openssl/openssl]:
-    <https://github.com/openssl/openssl>
-    "OpenSSL GitHub Mirror"
-
-[GitHub Wiki]:
-    <https://github.com/openssl/openssl/wiki>
-    "OpenSSL Wiki"
-
-[ossl-guide-migration(7ossl)]:
-    <https://www.openssl.org/docs/manmaster/man7/ossl-guide-migration.html>
-    "OpenSSL Migration Guide"
-
-[RFC 8446]:
-     <https://tools.ietf.org/html/rfc8446>
-
-[RFC 6347]:
-     <https://tools.ietf.org/html/rfc6347>
-
-[RFC 9000]:
-     <https://tools.ietf.org/html/rfc9000>
-
-[Binaries]:
-    <https://github.com/openssl/openssl/wiki/Binaries>
-    "List of third party OpenSSL binaries"
-
-[OpenSSL Guide]:
-    <https://www.openssl.org/docs/manmaster/man7/ossl-guide-introduction.html>
-    "An introduction to OpenSSL"
-
-<!-- Logos and Badges -->
-
-[openssl logo]:
-    doc/images/openssl.svg
-    "OpenSSL Logo"
-
-[github actions ci badge]:
-    <https://github.com/openssl/openssl/workflows/GitHub%20CI/badge.svg>
-    "GitHub Actions CI Status"
-
-[github actions ci]:
-    <https://github.com/openssl/openssl/actions?query=workflow%3A%22GitHub+CI%22>
-    "GitHub Actions CI"
-
-[appveyor badge]:
-    <https://ci.appveyor.com/api/projects/status/8e10o7xfrg73v98f/branch/master?svg=true>
-    "AppVeyor Build Status"
-
-[appveyor jobs]:
-    <https://ci.appveyor.com/project/openssl/openssl/branch/master>
-    "AppVeyor Jobs"
-
-# RFC 9763 Related Certificate Implementation for OpenSSL
-
-This project implements the "bound certificate" approach as defined in [RFC 9763](https://datatracker.ietf.org/doc/html/rfc9763) for the OpenSSL cryptographic library. The implementation provides support for the `relatedCertRequest` attribute in Certificate Signing Requests (CSRs) and the `RelatedCertificate` extension in X.509 certificates.
-
-## Overview
-
-RFC 9763 defines a mechanism to bind certificates together, allowing one certificate to reference another certificate through cryptographic means. This is particularly useful for:
-
-- Certificate chaining and relationship verification
-- Cross-certification scenarios
-- Certificate binding in multi-certificate environments
-- Post-quantum cryptography certificate binding
-
-## Features
-
-### Implemented Components
-
-1. **relatedCertRequest Attribute** (`id-aa-relatedCertRequest`)
-   - Added to Certificate Signing Requests (CSRs)
-   - Contains requester certificate information
-   - Includes timestamp and location information
-   - Digitally signed for integrity
-
-2. **RelatedCertificate Extension** (`id-pe-relatedCert`)
-   - Added to X.509 certificates
-   - Contains hash of the related certificate
-   - Supports multiple hash algorithms (SHA-256, SHA-512, etc.)
-
-### Key Functions
-
-- `add_related_cert_request_to_csr()` - Add relatedCertRequest attribute to CSR
-- `add_related_certificate_extension()` - Add RelatedCertificate extension to certificate
-- `verify_related_cert_request()` - Verify relatedCertRequest attribute
-- `verify_related_certificate_extension()` - Verify RelatedCertificate extension
-- `get_related_certificate_extension()` - Extract RelatedCertificate extension
-- `print_related_cert_request()` - Print relatedCertRequest attribute details
-- `print_related_certificate_extension()` - Print RelatedCertificate extension details
-
-## ASN.1 Structures
-
-The implementation defines the following ASN.1 structures according to RFC 9763:
-
-```asn.1
-CertID ::= SEQUENCE {
-    issuer           Name,
-    serialNumber     CertificateSerialNumber
-}
-
-BinaryTime ::= SEQUENCE {
-    time            OCTET STRING (SIZE(8))
-}
-
-UniformResourceIdentifiers ::= SEQUENCE OF IA5String
-
-RequesterCertificate ::= SEQUENCE {
-    certID          CertID,
-    requestTime     BinaryTime,
-    locationInfo    UniformResourceIdentifiers,
-    signature       BIT STRING OPTIONAL
-}
-
-RelatedCertificate ::= SEQUENCE {
-    hashAlgorithm   AlgorithmIdentifier,
-    hashValue       OCTET STRING
-}
-```
-
-## Building and Testing
-
-### Prerequisites
-
-- OpenSSL 3.0 or later
-- GCC compiler
-- Make
-
-### Build Options
+# Hybrid PQC Certificates in TLS 1.3 — Reproduction Artifact
+
+This repository is an OpenSSL fork that implements and benchmarks **hybrid
+post-quantum certificate formats** in TLS 1.3. It is the public reproduction
+artifact for the paper:
+
+> **From Standards to Practice: Benchmarking Hybrid PQC Certificates in TLS 1.3**
+> *IEEE Network* (to appear).
+> <!-- TODO: verify — add final DOI / volume / issue / page once published -->
+
+During the migration to post-quantum cryptography, certificates must often carry
+*both* a classical and a post-quantum signature so that the connection remains
+verifiable by parties that trust only one of the two. Several competing
+"hybrid certificate" formats have been proposed to encode this pairing. This
+fork implements four of them behind a single TLS extension and provides an
+end-to-end measurement harness that quantifies their handshake, cryptographic,
+and certificate-size overheads over realistic wide-area network conditions.
+
+The fork adds, in round numbers, **~8,000 lines of C** to OpenSSL's TLS 1.3
+handshake layer and X.509 certificate handling (plus a separate ~3,200-line
+measurement/test harness). The central handshake addition is a new
+`PQCertificateVerify` message that carries the proof-of-possession for the
+post-quantum key, chained onto the classical `CertificateVerify` transcript.
+
+> **Scope note (measured configuration).** In the benchmarked configuration,
+> *authentication* (signatures / certificates) is post-quantum, while the TLS
+> *key exchange* is classical **X25519** — the KEM is held fixed as a controlled
+> variable so the measurements isolate certificate/signature overhead. This is a
+> deliberate scope choice, not a hybrid PQC KEM deployment.
+
+---
+
+## Supported hybrid certificate formats
+
+Four hybrid formats are negotiated through the fork's `hybrid_cert` TLS
+extension. A fifth format, **Composite**, is handled entirely through
+oqs-provider composite signature OIDs on the standard `signature_algorithms`
+path and does **not** go through `hybrid_cert` (it is included in the
+measurements as a control, not as a negotiated hybrid type).
+
+| Type code | Format | Family | Mechanism (spec) |
+|:--:|---|---|---|
+| 1 | **Chameleon** | single certificate | Delta Certificate Descriptor (`DeltaCertificateDescriptor`); the delta (PQC) certificate is reconstructed from the base certificate's DCD extension |
+| 2 | **Catalyst** | single certificate | `subjectAltPublicKeyInfo` + `altSignatureAlgorithm` + `altSignatureValue` X.509 extensions on one object |
+| 3 | **Related** | multi certificate | RFC 9763 `RelatedCertificate` extension binding a PQC leaf to a classical leaf by hash |
+| 4 | **Dual** | multi certificate | two independent certificate chains (classical + PQC), draft-yusef-tls-pqt-dual-certs |
+| — | *Composite* | single certificate | oqs-provider composite OID (e.g. `p256_mldsa65`); negotiated via `signature_algorithms`, not `hybrid_cert` |
+
+### `hybrid_cert` type negotiation
+
+`hybrid_cert` (`TLSEXT_TYPE_hybrid_cert = 0xff51`) is a **capability + type
+selection** extension:
+
+- **ClientHello** — the client advertises the set of hybrid certificate types it
+  can verify, as a bitset over the type codes above
+  (`TLSEXT_HYBRID_CERT_TYPE_CHAMELEON=1` … `_DUAL=4`, see
+  `include/openssl/tls1.h`).
+- **Server** — the server selects one hybrid certificate it holds whose signature
+  algorithm matches the client's `signature_algorithms` preference, and **echoes
+  the single chosen type** back in the EncryptedExtensions message.
+- The algorithm itself (ML-DSA-44/65/87, Falcon-512/1024, SLH-DSA variants, …)
+  is negotiated through the **standard `signature_algorithms` extension** — there
+  is no separate algorithm-negotiation extension. (The earlier
+  `dual_signature_algorithms` extension has been **removed**; negotiation is
+  unified onto `signature_algorithms`.)
+
+Relevant symbols: `SSL_CTX_set_hybrid_cert_types()` /
+`SSL_set_hybrid_cert_types()` and `SSL_CTX_set_hybrid_cert_required()`
+(`include/openssl/ssl.h`).
+
+---
+
+## Build instructions
+
+### Toolchain (as used for the paper's measurements)
+
+| Component | Version | Notes |
+|---|---|---|
+| OpenSSL (this fork) | **3.3.4-dev** | `VERSION.dat`; branch `hybrid-cert` |
+| liboqs | **0.15.0** | paper-pinned (`test/certs/hybrid_e2e/aws/lib.sh`) |
+| oqs-provider | **0.11.0** | regenerated against liboqs 0.15.0 so that all six SLH-DSA parameter sets are registered (the 192s/256s/256f variants ship disabled in stock 0.11.0) |
+
+> oqs-provider is **not** the stock 0.11.0 binary: the 0.11.0 tag is checked out,
+> `oqs-template/generate.yml` is patched to enable SLH-DSA 192s/256s/256f, and
+> `generate.py` is re-run against the liboqs 0.15.0 sources. The provisioning
+> script `test/certs/hybrid_e2e/aws/setup.sh` performs these steps automatically.
+
+### 1. Build the fork's OpenSSL
+
+Build order matters: **build this fork first**, so that oqs-provider links
+against *this* `libcrypto` (a different `OSSL_LIB_CTX` from the system OpenSSL
+would break PQC certificate decoding at runtime).
 
 ```bash
-# Build with system OpenSSL (recommended)
-make test_certbind_system
+# functional build
+./Configure
+make -j"$(nproc)"
 
-# Build with custom OpenSSL installation
-make test_certbind
-
-# Build with debug information
-make debug
-
-# Run tests
-make test
-
-# Clean build artifacts
+# measurement build — adds the in-handshake sign/verify timers
 make clean
+./Configure -DHYBRID_MEASURE
+make -j"$(nproc)"
+make -j"$(nproc)" test/hybrid_measure
 ```
 
-### Test Program
+The `-DHYBRID_MEASURE` flag brackets the `EVP_DigestSign*` / `EVP_DigestVerify*`
+calls in the (PQ)CertificateVerify construct/process paths with
+`clock_gettime(CLOCK_MONOTONIC)` timers. Use a plain `./Configure` (no flag) for
+functional testing.
 
-The included test program (`test_certbind.c`) performs comprehensive testing:
+### 2. Build liboqs 0.15.0 and oqs-provider 0.11.0
 
-1. **Test 1**: Adding relatedCertRequest attribute to CSR
-2. **Test 2**: Saving CSR with attribute
-3. **Test 3**: Printing relatedCertRequest attribute
-4. **Test 4**: Verifying relatedCertRequest attribute
-5. **Test 5**: Creating certificate with RelatedCertificate extension
-6. **Test 6**: Saving certificate with extension
-7. **Test 7**: Printing RelatedCertificate extension
-8. **Test 8**: Verifying RelatedCertificate extension
-9. **Test 9**: Extracting RelatedCertificate extension
-10. **Test 10**: Testing with SHA-512 hash algorithm
+The exact, verified sequence — including the SLH-DSA `generate.yml` patch and the
+requirement that oqs-provider's cmake points at the fork via
+`-DOPENSSL_ROOT_DIR=<fork>` — lives in
+[`test/certs/hybrid_e2e/aws/setup.sh`](test/certs/hybrid_e2e/aws/setup.sh). On a
+fresh Ubuntu 24.04 AWS instance, `setup.sh` builds the fork, liboqs, and
+oqs-provider end to end and installs the provider module under
+`/usr/local/lib/ossl-modules`. Reuse it (or follow it step by step) rather than
+re-deriving the dependency build by hand.
 
-## Usage Examples
+### 3. Functional smoke test
 
-### Adding relatedCertRequest to CSR
+```bash
+OPENSSL_MODULES=/usr/local/lib/ossl-modules \
+  ./test/hybrid_e2e_test test/certs/hybrid_e2e
+```
 
-```c
-#include <openssl/x509.h>
-#include <openssl/evp.h>
-#include "crypto/x509/v3_certbind.h"
+This is also wired into the OpenSSL test harness as
+`test/recipes/90-test_hybrid_e2e.t`.
 
-// Create CSR and related certificate
-X509_REQ *req = /* your CSR */;
-EVP_PKEY *pkey = /* your private key */;
-X509 *related_cert = /* related certificate */;
+---
 
-// Add relatedCertRequest attribute
-if (add_related_cert_request_to_csr(req, pkey, related_cert, 
-                                   "related_cert.pem", EVP_sha256())) {
-    printf("relatedCertRequest attribute added successfully\n");
+## Reproducing the measurements
+
+The measurement infrastructure lives under
+[`test/certs/hybrid_e2e/`](test/certs/hybrid_e2e/). Two documents are the
+authoritative procedure and should be read first:
+
+- [`test/certs/hybrid_e2e/MEASURE_AWS_GUIDE.md`](test/certs/hybrid_e2e/MEASURE_AWS_GUIDE.md)
+  — what is measured and how (metrics, matrix, harness internals).
+- [`test/certs/hybrid_e2e/aws/README.md`](test/certs/hybrid_e2e/aws/README.md)
+  — the AWS automation (provision → setup → sanity → run → collect → teardown).
+
+### What is measured
+
+| Metric | Where | How |
+|---|---|---|
+| Handshake time | client | `clock_gettime` around `SSL_connect` |
+| PQ / classical sign time | server | `-DHYBRID_MEASURE` timers around `EVP_DigestSign*`, shipped to the client after the handshake |
+| PQ / classical verify time | client | `-DHYBRID_MEASURE` timers around `EVP_DigestVerify*` |
+| Certificate bytes | client | DER length of the peer leaf certificate |
+
+### Fixture / certificate generation
+
+`test/certs/hybrid_e2e/gen_smoke_certs.sh` generates the CA and key material
+(ECDSA / ML-DSA / Falcon / SLH-DSA roots and leaves) into a `smoke/` directory.
+Note two properties of the pipeline:
+
+- **Chameleon** and **Related** on-wire certificates are **not** static files —
+  they are assembled at runtime by the measurement harness in
+  `test/hybrid_fixtures.c` (`make_chameleon_base()` / `make_related_pqc()`),
+  using the generated CA/key material as inputs.
+- SLH-DSA fixtures use FIPS 205 labels (`slhdsa…`) in filenames/CSVs while the
+  oqs-provider is called with its algorithm names (`sphincs…simple`); the
+  generation script maps between them.
+
+### Launching a benchmark run
+
+The per-host driver is `test/certs/hybrid_e2e/measure_orchestrate.sh`. It sweeps,
+for each `(format, algorithm)` combination:
+
+- **Formats:** `dual`, `catalyst`, `chameleon`, `related`, plus `pure` (PQC-only)
+  and `traditional` (ECDSA) baselines, and `composite` as a control.
+- **PQC variants:** 11 (ML-DSA ×3, Falcon ×2, SLH-DSA ×6).
+- **Network conditions (applied *separately*):** packet loss `{0, 5, 10}%` and
+  bandwidth `{0, 1, 5, 10}` Mbit (`0` = unshaped), via `tc netem` (egress loss)
+  and `tbf` on an IFB device (ingress-shaped download).
+- **Repetitions:** `RUNS=100` per tuple (override via the `RUNS` env var).
+
+For the wide-area matrix, the AWS wrapper in `test/certs/hybrid_e2e/aws/` runs
+six `c5.xlarge` instances — a Seoul client paired with servers in **Tokyo**,
+**Singapore**, and **Virginia** (three region pairs) — and orchestrates the full
+provision→run→collect cycle. Collected per-shard CSVs are combined into
+`test/certs/hybrid_e2e/aws/results/combined.csv`.
+
+---
+
+## Additional results
+
+Figures and tables that did not fit in the paper are provided here.
+
+<!-- TODO: verify / populate — point these entries at the actual committed
+     locations once finalized. Currently present in the repo:
+       - test/certs/hybrid_e2e/aws/results/combined.csv          (canonical merged dataset)
+       - test/certs/hybrid_e2e/aws/results/analysis_outputs/     (derived figures/tables)
+     Fill in a short index (figure name -> file -> one-line caption) below. -->
+
+- **Canonical dataset:** `test/certs/hybrid_e2e/aws/results/combined.csv`
+  — merged results across all shards/regions. <!-- TODO: verify row count / schema -->
+- **Derived figures/tables:** `test/certs/hybrid_e2e/aws/results/analysis_outputs/`
+  <!-- TODO: add a per-figure index with captions -->
+- `figures/` — <!-- TODO: create and populate with the extended figures not in the paper -->
+
+---
+
+## Branch note
+
+The released implementation lives on the **`hybrid-cert`** branch (this branch),
+not on `master`. Check out `hybrid-cert` to reproduce the paper. The upstream
+OpenSSL history is retained for reference; the original OpenSSL project README is
+preserved under the upstream `master` branch.
+
+---
+
+## Citation
+
+```bibtex
+@article{hybridpqc-tls13,
+  title   = {From Standards to Practice: Benchmarking Hybrid PQC Certificates in TLS 1.3},
+  author  = {<!-- TODO: verify — author list -->},
+  journal = {IEEE Network},
+  year    = {<!-- TODO: verify -->},
+  doi     = {<!-- TODO: verify -->}
 }
 ```
 
-### Adding RelatedCertificate Extension
-
-```c
-#include <openssl/x509.h>
-#include <openssl/evp.h>
-#include "crypto/x509/v3_certbind.h"
-
-// Create certificate and related certificate
-X509 *cert = /* your certificate */;
-X509 *related_cert = /* related certificate */;
-
-// Add RelatedCertificate extension
-if (add_related_certificate_extension(cert, related_cert, EVP_sha256())) {
-    printf("RelatedCertificate extension added successfully\n");
-}
-```
-
-### Verification
-
-```c
-// Verify relatedCertRequest attribute
-if (verify_related_cert_request(req)) {
-    printf("relatedCertRequest verification passed\n");
-}
-
-// Verify RelatedCertificate extension
-if (verify_related_certificate_extension(cert, related_cert)) {
-    printf("RelatedCertificate verification passed\n");
-}
-```
-
-## OID Registration
-
-The implementation uses the following Object Identifiers as defined in RFC 9763:
-
-- `id-aa-relatedCertRequest`: `1.2.840.113549.1.9.16.2.60`
-- `id-pe-relatedCert`: `1.3.6.1.5.5.7.1.36`
-
-These OIDs are already defined in OpenSSL's `objects.txt` and will be available after regenerating the object macros.
-
-## Conformance to RFC 9763
-
-The implementation follows RFC 9763 specifications:
-
-- ✅ Correct ASN.1 structure definitions
-- ✅ BinaryTime format for timestamps (RFC 6019)
-- ✅ UniformResourceIdentifiers as SEQUENCE OF IA5String
-- ✅ Proper signature handling in RequesterCertificate
-- ✅ Hash algorithm support in RelatedCertificate
-- ✅ OID usage as specified in the RFC
-- ✅ Timestamp freshness checking (5-minute timeout)
-
-## Security Considerations
-
-1. **Timestamp Freshness**: The implementation enforces a 5-minute timeout for requestTime freshness as recommended in RFC 9763.
-
-2. **Signature Verification**: All relatedCertRequest attributes are digitally signed and verified using the requester's private key.
-
-3. **Hash Algorithm Support**: The implementation supports multiple hash algorithms, with SHA-256 as the default.
-
-4. **Memory Management**: Proper cleanup of ASN.1 structures and memory allocation.
-
-## Limitations
-
-1. **Extension Registration**: The implementation uses raw ASN.1 encoding for extensions to avoid OpenSSL extension registration complexities.
-
-2. **URI Handling**: Currently supports file-based URIs for testing. Production use may require HTTP/HTTPS URI support.
-
-3. **Stack API Compatibility**: Some OpenSSL stack API functions may show deprecation warnings but remain functional.
-
-## Contributing
-
-This implementation is designed to be integrated into the OpenSSL codebase. Contributions should:
-
-1. Follow OpenSSL coding standards
-2. Include comprehensive tests
-3. Maintain RFC 9763 compliance
-4. Handle error conditions gracefully
+---
 
 ## License
 
-This implementation follows the OpenSSL license model. See the Apache License 2.0 for details.
-
-## References
-
-- [RFC 9763: Related Certificate Request and Response](https://datatracker.ietf.org/doc/html/rfc9763)
-- [RFC 6019: BinaryTime: An Alternate Format for Representing Date and Time in ASN.1](https://datatracker.ietf.org/doc/html/rfc6019)
-- [OpenSSL Documentation](https://www.openssl.org/docs/)
+This project is a fork of OpenSSL and is distributed under the terms of the
+OpenSSL license (Apache License 2.0). See [`LICENSE.txt`](LICENSE.txt). All added
+hybrid-certificate and measurement code is released under the same terms.
