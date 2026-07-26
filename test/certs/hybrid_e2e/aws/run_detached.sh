@@ -14,6 +14,16 @@
 set -uo pipefail
 cd "$(dirname "$0")"; . ./lib.sh
 RUNS="${RUNS:-100}"; IFACE="${IFACE:-ens5}"
+# Optional network-condition overrides (blank => orchestrator defaults = full
+# matrix). For a bandwidth-only re-measure: LOSSES=0 BWS="1 5 10".
+LOSSES_ENV="${LOSSES:-}"; BWS_ENV="${BWS:-}"
+CONDEXP=""
+[ -n "$LOSSES_ENV" ] && CONDEXP="export LOSSES='$LOSSES_ENV'"
+[ -n "$BWS_ENV" ] && CONDEXP="$CONDEXP${CONDEXP:+
+}export BWS='$BWS_ENV'"
+# Record the effective conditions so a later bare ./poll_detached.sh derives
+# the matching per-combo row expectation instead of assuming the full matrix.
+{ echo "LOSSES='${LOSSES_ENV:-0 5 10}'"; echo "BWS='${BWS_ENV:-0 1 5 10}'"; } > .last_run.env
 
 for pair in $PAIRS; do
   label=$(region_label_for_pair "$pair")
@@ -29,6 +39,7 @@ cat > /tmp/orch_srv.sh <<'INNER'
 cd $REMOTE_HYBRID
 export RUNS=$RUNS PORT=$PORT RESUME=0 SHARD=$shard
 export ALGS='$algs' COMPOSITE_ALGS='$comp' ECDSA_TAGS='$ecd'
+$CONDEXP
 exec ./measure_orchestrate.sh server
 INNER
 chmod +x /tmp/orch_srv.sh
@@ -44,6 +55,7 @@ cat > /tmp/orch_cli.sh <<'INNER'
 cd $REMOTE_HYBRID
 export RUNS=$RUNS PORT=$PORT RESUME=0 SHARD=$shard IFACE=$IFACE
 export ALGS='$algs' COMPOSITE_ALGS='$comp' ECDSA_TAGS='$ecd'
+$CONDEXP
 exec ./measure_orchestrate.sh client $sip $label
 INNER
 chmod +x /tmp/orch_cli.sh

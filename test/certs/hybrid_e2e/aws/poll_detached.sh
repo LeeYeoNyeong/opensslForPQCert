@@ -2,20 +2,34 @@
 #
 # poll_detached.sh -- watch the detached per-shard measurement to completion.
 # Prints one progress line per cycle; exits 0 when every shard's client CSV has
-# reached its expected row count (combos x 6 conditions x RUNS), or non-zero if a
+# reached its expected row count (combos x conditions x RUNS), or non-zero if a
 # shard's orchestrator has died with an incomplete CSV and made no progress for
 # two consecutive cycles (a genuine stall, not just slow).
 set -uo pipefail
 cd "$(dirname "$0")"; . ./lib.sh
 RUNS="${RUNS:-100}"; INTERVAL="${INTERVAL:-120}"; MAXCYC="${MAXCYC:-60}"
 
-# expected CSV data-rows for a shard = combos x 6 conditions x RUNS
+# Conditions per combo, mirroring measure_orchestrate.sh conditions(): the
+# unshaped baseline plus each nonzero loss and each nonzero bandwidth value.
+# Derived from the same LOSSES/BWS env the run was launched with, so an
+# override like LOSSES=0 BWS="1 5 10" is counted correctly without having to
+# pass a matching NCOND by hand; an explicit NCOND still wins.
+if [ -z "${NCOND:-}" ]; then
+    # No explicit env: fall back to the conditions run_detached.sh recorded at
+    # launch, so a bare ./poll_detached.sh matches a reduced-condition run.
+    [ -z "${LOSSES:-}${BWS:-}" ] && [ -f .last_run.env ] && . ./.last_run.env
+    NCOND=1
+    for _l in ${LOSSES:-0 5 10};   do [ "$_l" = 0 ] || NCOND=$((NCOND+1)); done
+    for _b in ${BWS:-0 1 5 10};    do [ "$_b" = 0 ] || NCOND=$((NCOND+1)); done
+fi
+
+# expected CSV data-rows for a shard = combos x NCOND conditions x RUNS
 expected_for() { # $1=shard
     local na nc ne
     na=$(echo $(shard_algs "$1") | wc -w)
     nc=$(echo $(shard_composite "$1") | wc -w)
     ne=$(echo $(shard_ecdsa "$1") | wc -w)
-    echo $(( (5*na + nc + ne) * 6 * RUNS ))
+    echo $(( (5*na + nc + ne) * NCOND * RUNS ))
 }
 
 declare -a PREV
