@@ -2250,7 +2250,13 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
      * set. The *documented* interface remains the same.
      */
     ERR_set_mark();
+#ifdef HYBRID_MEASURE
+    HYBRID_MEASURE_START(_hm_cv0);
+#endif
     i = ssl_verify_cert_chain(s, s->session->peer_chain);
+#ifdef HYBRID_MEASURE
+    HYBRID_MEASURE_ACCUM(s->hybrid_measure.cert_chain_verify_ns, _hm_cv0);
+#endif
     if (i <= 0 && s->verify_mode != SSL_VERIFY_NONE) {
         ERR_clear_last_mark();
         SSLfatal(s, ssl_x509err2alert(s->verify_result),
@@ -2283,7 +2289,13 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
     if (s->session->dual_certs_enabled && s->session->peer_pqc_chain != NULL
         && sk_X509_num(s->session->peer_pqc_chain) > 0) {
         ERR_set_mark();
+#ifdef HYBRID_MEASURE
+        HYBRID_MEASURE_START(_hm_cv1);
+#endif
         int pqc_verify_result = ssl_verify_cert_chain(s, s->session->peer_pqc_chain);
+#ifdef HYBRID_MEASURE
+        HYBRID_MEASURE_ACCUM(s->hybrid_measure.cert_chain_verify_ns, _hm_cv1);
+#endif
         if (pqc_verify_result <= 0 && s->verify_mode != SSL_VERIFY_NONE) {
             ERR_clear_last_mark();
             SSLfatal(s, ssl_x509err2alert(s->verify_result),
@@ -2302,11 +2314,17 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
      * ssl_verify_cert_chain() above. No-op when the peer is not a Chameleon
      * cert or hybrid auth is not in effect.
      */
+#ifdef HYBRID_MEASURE
+    HYBRID_MEASURE_START(_hm_cv2);
+#endif
     if (!ssl_verify_chameleon_dcd(s, sk_X509_value(s->session->peer_chain, 0),
                                   s->session->peer_chain)) {
         SSLfatal(s, SSL_AD_BAD_CERTIFICATE, SSL_R_CERTIFICATE_VERIFY_FAILED);
         return WORK_ERROR;
     }
+#ifdef HYBRID_MEASURE
+    HYBRID_MEASURE_ACCUM(s->hybrid_measure.cert_chain_verify_ns, _hm_cv2);
+#endif
     /*
      * Preserve asynchronous verification semantics: the verify callback used
      * while validating the reconstructed Delta may request a retry via
@@ -2382,6 +2400,9 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
      */
     if (s->session->dual_certs_enabled && s->session->peer_pqc_chain != NULL
             && sk_X509_num(s->session->peer_pqc_chain) > 0) {
+#ifdef HYBRID_MEASURE
+        HYBRID_MEASURE_START(_hm_cv3);
+#endif
         X509 *pqc_leaf = sk_X509_value(s->session->peer_pqc_chain, 0);
         RELATED_CERTIFICATE *rc = get_related_certificate_extension(pqc_leaf);
 
@@ -2429,6 +2450,9 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
 
             RELATED_CERTIFICATE_free(rc);
         }
+#ifdef HYBRID_MEASURE
+        HYBRID_MEASURE_ACCUM(s->hybrid_measure.cert_chain_verify_ns, _hm_cv3);
+#endif
     }
 
     /* Save the current hash state for when we receive the CertificateVerify */

@@ -46,6 +46,16 @@ typedef struct hybrid_measure_st {
     uint64_t pq_verify_ns;
     uint64_t classical_sign_ns;
     uint64_t classical_verify_ns;
+    /*
+     * Client-side certificate chain / hybrid-format validation cost, kept
+     * separate from the PoP sign/verify counters above.  Accumulates every
+     * validation performed in tls_post_process_server_certificate(): the main
+     * X.509 chain (including Catalyst alt-signature checks inside
+     * ssl_verify_cert_chain), the separate PQC chain (Dual/Related), the
+     * Chameleon Delta reconstruction+chain check, and the RFC 9763 Related
+     * binding hash.
+     */
+    uint64_t cert_chain_verify_ns;
 } OSSL_HYBRID_MEASURE;
 
 /*

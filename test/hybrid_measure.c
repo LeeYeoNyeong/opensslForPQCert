@@ -44,7 +44,14 @@
  * CSV columns (header written by --csv-header):
  *   region,format,algorithm,cat_level,loss,bw,run,handshake_ms,
  *   pq_sign_ms,pq_verify_ms,classical_sign_ms,classical_verify_ms,
- *   cert_bytes,verify_ok
+ *   cert_bytes,verify_ok,cert_verify_ms
+ *
+ *   cert_verify_ms (appended last so older column-indexed tooling still works)
+ *   is the client-side X.509 certificate chain / hybrid-format validation cost
+ *   accumulated in tls_post_process_server_certificate(): main chain (incl.
+ *   Catalyst alt-signature), PQC chain (Dual/Related), Chameleon Delta
+ *   reconstruction and the RFC 9763 Related binding hash.  It is separate from
+ *   the PoP (CertificateVerify / PQCertificateVerify) sign/verify columns.
  *
  * Composite format note (column semantics):
  *   The "composite" format presents a single leaf certificate whose key is an
@@ -132,12 +139,13 @@ typedef struct {
     double classical_verify_ms;
     long cert_bytes;
     int verify_ok;
+    double cert_verify_ms;
 } sample;
 
 static const char *CSV_HEADER =
     "region,format,algorithm,cat_level,loss,bw,run,handshake_ms,"
     "pq_sign_ms,pq_verify_ms,classical_sign_ms,classical_verify_ms,"
-    "cert_bytes,verify_ok";
+    "cert_bytes,verify_ok,cert_verify_ms";
 
 /* --- timing & error helpers ------------------------------------------------ */
 
@@ -182,7 +190,8 @@ static void msg_cb(int write_p, int version, int content_type, const void *buf,
  * read, 0 if this is a non-measurement build (callers then report 0 ms).
  */
 static int read_crypto_ns(SSL *ssl, uint64_t *pq_sign, uint64_t *pq_verify,
-                          uint64_t *cl_sign, uint64_t *cl_verify)
+                          uint64_t *cl_sign, uint64_t *cl_verify,
+                          uint64_t *chain_verify)
 {
 #ifdef HYBRID_MEASURE
     SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(ssl);
@@ -193,9 +202,10 @@ static int read_crypto_ns(SSL *ssl, uint64_t *pq_sign, uint64_t *pq_verify,
     *pq_verify = sc->hybrid_measure.pq_verify_ns;
     *cl_sign = sc->hybrid_measure.classical_sign_ns;
     *cl_verify = sc->hybrid_measure.classical_verify_ns;
+    *chain_verify = sc->hybrid_measure.cert_chain_verify_ns;
     return 1;
 #else
-    *pq_sign = *pq_verify = *cl_sign = *cl_verify = 0;
+    *pq_sign = *pq_verify = *cl_sign = *cl_verify = *chain_verify = 0;
     return 0;
 #endif
 }
@@ -322,7 +332,7 @@ static int run_server(SSL_CTX *sctx, int listen_fd, int runs)
         int cfd = accept(listen_fd, NULL, NULL);
         { int _nd = 1; setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &_nd, sizeof(_nd)); }
         SSL *ssl;
-        uint64_t ps = 0, pv = 0, cs = 0, cv = 0;
+        uint64_t ps = 0, pv = 0, cs = 0, cv = 0, chv = 0;
         char line[96];
         int n;
 
@@ -335,7 +345,7 @@ static int run_server(SSL_CTX *sctx, int listen_fd, int runs)
         }
         SSL_set_fd(ssl, cfd);
         if (SSL_accept(ssl) == 1) {
-            read_crypto_ns(ssl, &ps, &pv, &cs, &cv);
+            read_crypto_ns(ssl, &ps, &pv, &cs, &cv, &chv);
             n = BIO_snprintf(line, sizeof(line), "%llu %llu\n",
                              (unsigned long long)ps, (unsigned long long)cs);
             if (n > 0)
@@ -404,7 +414,7 @@ static int run_client_once(SSL_CTX *cctx, const char *host, int port,
     SSL *ssl = NULL;
     obs_t obs;
     uint64_t t0, t1, cps = 0, ccs = 0;          /* server-reported sign ns */
-    uint64_t ps = 0, pv = 0, cs = 0, cv = 0;    /* client-read counters */
+    uint64_t ps = 0, pv = 0, cs = 0, cv = 0, chv = 0;    /* client-read counters */
     X509 *peer = NULL;
     int hybrid = hf_format_is_hybrid(fmt);
     int ok = 0;
@@ -434,13 +444,14 @@ static int run_client_once(SSL_CTX *cctx, const char *host, int port,
 
     /* Read the server's sign timings before tearing the connection down. */
     read_server_timings(ssl, &cps, &ccs);
-    read_crypto_ns(ssl, &ps, &pv, &cs, &cv);
+    read_crypto_ns(ssl, &ps, &pv, &cs, &cv, &chv);
 
     /* Sign timings come from the server; verify timings from this client. */
     out->pq_sign_ms = (double)cps / 1e6;
     out->classical_sign_ms = (double)ccs / 1e6;
     out->pq_verify_ms = (double)pv / 1e6;
     out->classical_verify_ms = (double)cv / 1e6;
+    out->cert_verify_ms = (double)chv / 1e6;
 
     /*
      * cert_bytes = total transmitted certificate bytes (3-tier handshake
@@ -496,11 +507,11 @@ static int run_client_once(SSL_CTX *cctx, const char *host, int port,
 
 static void csv_write_row(FILE *f, const opts *o, int run, const sample *s)
 {
-    fprintf(f, "%s,%s,%s,%s,%s,%s,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%ld,%d\n",
+    fprintf(f, "%s,%s,%s,%s,%s,%s,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%ld,%d,%.4f\n",
             o->region, o->format, o->alg, o->cat_level, o->loss, o->bw,
             run, s->handshake_ms, s->pq_sign_ms, s->pq_verify_ms,
             s->classical_sign_ms, s->classical_verify_ms,
-            s->cert_bytes, s->verify_ok);
+            s->cert_bytes, s->verify_ok, s->cert_verify_ms);
     fflush(f);
 }
 
