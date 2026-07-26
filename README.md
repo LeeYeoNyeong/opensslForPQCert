@@ -5,8 +5,8 @@ post-quantum certificate formats** in TLS 1.3. It is the public reproduction
 artifact for the paper:
 
 > **From Standards to Practice: Benchmarking Hybrid PQC Certificates in TLS 1.3**
-> *IEEE Network* (to appear).
-> <!-- TODO: verify — add final DOI / volume / issue / page once published -->
+> *IEEE Network* (to appear — final DOI / volume / issue will be added upon
+> publication).
 
 During the migration to post-quantum cryptography, certificates must often carry
 *both* a classical and a post-quantum signature so that the connection remains
@@ -149,13 +149,19 @@ authoritative procedure and should be read first:
 | Handshake time | client | `clock_gettime` around `SSL_connect` |
 | PQ / classical sign time | server | `-DHYBRID_MEASURE` timers around `EVP_DigestSign*`, shipped to the client after the handshake |
 | PQ / classical verify time | client | `-DHYBRID_MEASURE` timers around `EVP_DigestVerify*` |
-| Certificate bytes | client | DER length of the peer leaf certificate |
+| Certificate-chain verification time | client | `-DHYBRID_MEASURE` timer around the X.509 chain / hybrid-format validations in `tls_post_process_server_certificate` (main chain incl. Catalyst alt-signature, PQC chain, Chameleon Delta reconstruction, RFC 9763 Related binding); reported as the trailing `cert_verify_ms` CSV column |
+| Certificate bytes | client | total DER bytes of **all** certificates the server transmitted: main `certificate_list` (leaf + intermediate) plus the separate PQC chain for the multi-certificate hybrids — the Root (trust anchor) is never sent and is excluded |
+
+The sign/verify timers cover only the proof-of-possession signatures
+(`CertificateVerify` / `PQCertificateVerify`); certificate-chain verification is
+reported separately in `cert_verify_ms` rather than folded into them.
 
 ### Fixture / certificate generation
 
 `test/certs/hybrid_e2e/gen_smoke_certs.sh` generates the CA and key material
-(ECDSA / ML-DSA / Falcon / SLH-DSA roots and leaves) into a `smoke/` directory.
-Note two properties of the pipeline:
+(ECDSA / ML-DSA / Falcon / SLH-DSA) into a `smoke/` directory as **3-tier
+chains** (Root → intermediate CA → leaf); the Root acts as the trust anchor and
+is never transmitted. Note two properties of the pipeline:
 
 - **Chameleon** and **Related** on-wire certificates are **not** static files —
   they are assembled at runtime by the measurement harness in
@@ -178,29 +184,36 @@ for each `(format, algorithm)` combination:
   and `tbf` on an IFB device (ingress-shaped download).
 - **Repetitions:** `RUNS=100` per tuple (override via the `RUNS` env var).
 
-For the wide-area matrix, the AWS wrapper in `test/certs/hybrid_e2e/aws/` runs
-six `c5.xlarge` instances — a Seoul client paired with servers in **Tokyo**,
-**Singapore**, and **Virginia** (three region pairs) — and orchestrates the full
-provision→run→collect cycle. Collected per-shard CSVs are combined into
-`test/certs/hybrid_e2e/aws/results/combined.csv`.
+For the wide-area matrix, the AWS wrapper in `test/certs/hybrid_e2e/aws/` pairs
+Seoul clients with servers in **Tokyo**, **Singapore**, and **Virginia** (three
+region pairs, `c5.xlarge`), and orchestrates the full
+provision→setup→run→collect→teardown cycle. Each region pair is split into
+load-balanced intra-region shards (`SHARDS` in `aws/lib.sh`; the paper campaign
+used 9 shards per pair, i.e. 54 instances, isolating each slow SLH-DSA-*s*
+variant on its own shard). Collected per-shard CSVs are merged into a single
+`combined.csv` under `aws/results/` (untracked — see below).
 
 ---
 
-## Additional results
+## Dataset availability
 
-Figures and tables that did not fit in the paper are provided here.
+Raw measurement data is **not tracked in this repository by design**
+(`aws/results/`, run logs, and instance artifacts are gitignored — they carry
+per-run infrastructure details). The paper's canonical dataset is a single
+merged CSV of **124,200 handshakes** (`verify_ok` 100%; 100 runs per
+region × format × algorithm × network-condition group) with the schema:
 
-<!-- TODO: verify / populate — point these entries at the actual committed
-     locations once finalized. Currently present in the repo:
-       - test/certs/hybrid_e2e/aws/results/combined.csv          (canonical merged dataset)
-       - test/certs/hybrid_e2e/aws/results/analysis_outputs/     (derived figures/tables)
-     Fill in a short index (figure name -> file -> one-line caption) below. -->
+```
+region,format,algorithm,cat_level,loss,bw,run,handshake_ms,
+pq_sign_ms,pq_verify_ms,classical_sign_ms,classical_verify_ms,
+cert_bytes,verify_ok
+```
 
-- **Canonical dataset:** `test/certs/hybrid_e2e/aws/results/combined.csv`
-  — merged results across all shards/regions. <!-- TODO: verify row count / schema -->
-- **Derived figures/tables:** `test/certs/hybrid_e2e/aws/results/analysis_outputs/`
-  <!-- TODO: add a per-figure index with captions -->
-- `figures/` — <!-- TODO: create and populate with the extended figures not in the paper -->
+Runs made with the current tree additionally append a trailing
+`cert_verify_ms` column (client certificate-chain verification, added after the
+paper campaign; `hybrid_measure --csv-header` prints the current 15-column
+header). The dataset is available from the authors on request, and any row of it
+can be regenerated with the AWS automation above.
 
 ---
 
@@ -215,13 +228,14 @@ preserved under the upstream `master` branch.
 
 ## Citation
 
+The paper is accepted at *IEEE Network*; the BibTeX entry below will be
+completed (authors, year, DOI) once the final publication details are assigned.
+
 ```bibtex
 @article{hybridpqc-tls13,
   title   = {From Standards to Practice: Benchmarking Hybrid PQC Certificates in TLS 1.3},
-  author  = {<!-- TODO: verify — author list -->},
   journal = {IEEE Network},
-  year    = {<!-- TODO: verify -->},
-  doi     = {<!-- TODO: verify -->}
+  note    = {To appear}
 }
 ```
 
