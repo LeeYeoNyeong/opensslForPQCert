@@ -92,6 +92,7 @@ CERT *ssl_cert_new(size_t ssl_pkey_num)
     ret->pq_chain_store = NULL;
     ret->hybrid_cert_enabled = 0;
     ret->hybrid_cert_required = 0;
+    ret->hybrid_cert_types = 0;
     ret->alt_privatekey = NULL;
     ret->delta_privatekey = NULL;
 
@@ -234,6 +235,7 @@ CERT *ssl_cert_dup(CERT *cert)
 
     ret->hybrid_cert_enabled = cert->hybrid_cert_enabled;
     ret->hybrid_cert_required = cert->hybrid_cert_required;
+    ret->hybrid_cert_types = cert->hybrid_cert_types;
 
     if (cert->pq_verify_store != NULL) {
         X509_STORE_up_ref(cert->pq_verify_store);

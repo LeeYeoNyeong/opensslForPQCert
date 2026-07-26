@@ -509,6 +509,46 @@ static int test_downgrade_permissive(void)
 }
 
 /*
+ * Test 5d: certificate-type intersection (hybrid_cert type negotiation). The
+ * server is provisioned with the Dual format. A permissive client restricts the
+ * hybrid certificate types it advertises via SSL_CTX_set_hybrid_cert_types:
+ *   idx 0: advertises {DUAL}     -> intersection non-empty -> hybrid negotiated
+ *          (positive control: the restrict setter still permits the right type).
+ *   idx 1: advertises {CATALYST} -> intersection EMPTY -> standard TLS 1.3
+ *          fallback: handshake completes, no PQCertificateVerify (Fallback B).
+ */
+static int test_type_intersection(int idx)
+{
+    SSL_CTX *sctx = NULL, *cctx = NULL;
+    handshake_obs obs;
+    int negotiated = 0, ok = 0;
+    /* Server is Dual; idx 0 advertises the matching type, idx 1 a foreign one. */
+    const uint8_t client_types[] = {
+        (uint8_t)(idx == 0 ? TLSEXT_HYBRID_CERT_TYPE_DUAL
+                           : TLSEXT_HYBRID_CERT_TYPE_CATALYST)
+    };
+    int expect_hybrid = (idx == 0);
+
+    if (!have_oqs)
+        return TEST_skip("oqsprovider not available");
+    if (!build_pair(&sctx, &cctx, 1, 1))
+        goto end;
+    if (!TEST_true(SSL_CTX_set_hybrid_cert_types(cctx, client_types,
+                                                 OSSL_NELEM(client_types))))
+        goto end;
+    if (!TEST_true(connect_observed(sctx, cctx, &obs, &negotiated, NULL, 0, 0)))
+        goto end;
+    if (!TEST_int_eq(negotiated, expect_hybrid)
+            || !TEST_int_eq(obs.pq_cert_verify, expect_hybrid))
+        goto end;
+    ok = 1;
+ end:
+    SSL_CTX_free(sctx);
+    SSL_CTX_free(cctx);
+    return ok;
+}
+
+/*
  * Test 6: mutual TLS. The server requires a client certificate and verifies the
  * client's Dual (classical + PQC) chains. A successful handshake exercises the
  * symmetric, server-side hybrid authentication path (the client now produces the
@@ -1045,6 +1085,46 @@ static int test_related_binding_enforced(void)
     return ok;
 }
 
+/*
+ * Test 11: Related-vs-Dual type classification. The server is provisioned with
+ * the Related format (its PQC leaf carries the RFC 9763 RelatedCertificate
+ * extension). The server must derive type RELATED -- NOT Dual -- from that PQC
+ * leaf, so:
+ *   idx 0: client advertises {RELATED} -> intersection non-empty -> hybrid,
+ *          proving the server did not misclassify a Related cert as Dual.
+ *   idx 1: client advertises {DUAL}    -> intersection EMPTY -> standard TLS 1.3
+ *          fallback, proving a Related server is not offered as Dual.
+ */
+static int test_related_type_intersection(int idx)
+{
+    SSL_CTX *sctx = NULL, *cctx = NULL;
+    handshake_obs obs;
+    int negotiated = 0, ok = 0;
+    const uint8_t client_types[] = {
+        (uint8_t)(idx == 0 ? TLSEXT_HYBRID_CERT_TYPE_RELATED
+                           : TLSEXT_HYBRID_CERT_TYPE_DUAL)
+    };
+    int expect_hybrid = (idx == 0);
+
+    if (!have_oqs)
+        return TEST_skip("oqsprovider not available");
+    if (!build_related_pair(&sctx, &cctx, 0))
+        goto end;
+    if (!TEST_true(SSL_CTX_set_hybrid_cert_types(cctx, client_types,
+                                                 OSSL_NELEM(client_types))))
+        goto end;
+    if (!TEST_true(connect_observed(sctx, cctx, &obs, &negotiated, NULL, 0, 0)))
+        goto end;
+    if (!TEST_int_eq(negotiated, expect_hybrid)
+            || !TEST_int_eq(obs.pq_cert_verify, expect_hybrid))
+        goto end;
+    ok = 1;
+ end:
+    SSL_CTX_free(sctx);
+    SSL_CTX_free(cctx);
+    return ok;
+}
+
 int setup_tests(void)
 {
     if (!TEST_ptr(certsdir = test_get_argument(0)))
@@ -1061,11 +1141,13 @@ int setup_tests(void)
     ADD_ALL_TESTS(test_pair_matching, 2);
     ADD_TEST(test_downgrade_strict_no_echo);
     ADD_TEST(test_downgrade_permissive);
+    ADD_ALL_TESTS(test_type_intersection, 2);
     ADD_TEST(test_mutual_tls);
     ADD_TEST(test_catalyst_happy_path);
     ADD_TEST(test_chameleon_happy_path);
     ADD_TEST(test_related_happy_path);
     ADD_TEST(test_related_binding_enforced);
+    ADD_ALL_TESTS(test_related_type_intersection, 2);
     return 1;
 }
 

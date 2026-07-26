@@ -68,6 +68,7 @@
 #include "ssl_local.h"
 #include "quic/quic_local.h"
 #include <openssl/ct.h>
+#include <openssl/v3_certbind.h>
 
 static const SIGALG_LOOKUP *find_sig_alg(SSL_CONNECTION *s, X509 *x, EVP_PKEY *pkey);
 static int tls12_sigalg_allowed(const SSL_CONNECTION *s, int op, const SIGALG_LOOKUP *lu);
@@ -4164,12 +4165,34 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
      * back to standard TLS 1.3 (no PQCertificateVerify).
      */
     s->s3.tmp.pq_sigalg = NULL;
+    s->s3.tmp.hybrid_cert_type = TLSEXT_HYBRID_CERT_TYPE_NONE;
     if (s->cert->hybrid_cert_enabled && s->s3.tmp.hybrid_cert) {
         EVP_PKEY *pq_priv = NULL;
+        int server_type = TLSEXT_HYBRID_CERT_TYPE_NONE;
 
         if (s->cert->pqkey != NULL && s->cert->pqkey->privatekey != NULL) {
-            /* Dual (multi-certificate): the PQ key lives in the second cert. */
+            /*
+             * Multi-certificate: the PQ key lives in the second (PQC)
+             * certificate. Dual and Related share this path; they are told apart
+             * by the same signal the verifier keys off -- the presence of an RFC
+             * 9763 RelatedCertificate extension. That extension is carried on the
+             * PQC leaf (s->cert->pqkey->x509), which is exactly the certificate
+             * transmitted and later checked by the peer's verifier (it inspects
+             * the received PQC leaf in peer_pqc_chain), NOT on the transmitted
+             * classical leaf (s3.tmp.cert->x509). Deriving the type from the PQC
+             * leaf keeps type negotiation in lockstep with verification.
+             */
             pq_priv = s->cert->pqkey->privatekey;
+            server_type = TLSEXT_HYBRID_CERT_TYPE_DUAL;
+            if (s->cert->pqkey->x509 != NULL) {
+                RELATED_CERTIFICATE *rc =
+                    get_related_certificate_extension(s->cert->pqkey->x509);
+
+                if (rc != NULL) {
+                    server_type = TLSEXT_HYBRID_CERT_TYPE_RELATED;
+                    RELATED_CERTIFICATE_free(rc);
+                }
+            }
         } else if (s->cert->alt_privatekey != NULL
                    && s->s3.tmp.cert != NULL
                    && ssl_cert_catalyst_altkey_matches(s->s3.tmp.cert->x509,
@@ -4186,6 +4209,7 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
              * with keeps negotiation and signing in lockstep.
              */
             pq_priv = s->cert->alt_privatekey;
+            server_type = TLSEXT_HYBRID_CERT_TYPE_CATALYST;
         } else if (s->cert->delta_privatekey != NULL
                    && s->s3.tmp.cert != NULL
                    && ssl_cert_chameleon_deltakey_matches(s->s3.tmp.cert->x509,
@@ -4200,9 +4224,33 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
              * signs with, keeping negotiation and signing in lockstep.
              */
             pq_priv = s->cert->delta_privatekey;
+            server_type = TLSEXT_HYBRID_CERT_TYPE_CHAMELEON;
         }
 
-        if (pq_priv != NULL) {
+        /*
+         * Certificate-type intersection (folded into the single hybrid gate).
+         * On the server, hybrid is negotiated only if the one provisioned type
+         * derived above also lies in the set the client advertised in the
+         * hybrid_cert extension (s3.tmp.hybrid_cert_offered). When that set does
+         * not contain the server's type we leave pq_sigalg NULL exactly as a
+         * failed algorithm pairing would, so SSL_CONNECTION_HYBRID_NEGOTIATED()
+         * stays false and BOTH the EncryptedExtensions echo and the
+         * PQCertificateVerify are suppressed -- a clean fall back to standard
+         * TLS 1.3 (empty-intersection fallback).
+         *
+         * The client (mTLS client authentication) has no peer-advertised set to
+         * intersect here: hybrid_cert_offered is only populated while the server
+         * parses the ClientHello, and the client's own type was already agreed
+         * via the server's EncryptedExtensions echo (validated in
+         * tls_parse_stoc_hybrid_cert). So on the client the intersection is
+         * skipped -- gating on hybrid_cert_offered would otherwise always fail
+         * (it is zero on the client) and silently downgrade client-auth.
+         */
+        if (pq_priv != NULL
+                && SSL_HYBRID_CERT_TYPE_VALID(server_type)
+                && (!s->server
+                    || (s->s3.tmp.hybrid_cert_offered
+                        & SSL_HYBRID_CERT_TYPE_BIT(server_type)) != 0)) {
             const SIGALG_LOOKUP *key_pq_lu = NULL;
 
             if (tls1_select_pq_sigalg(s, pq_priv, &key_pq_lu)
@@ -4211,8 +4259,25 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
                                     s->s3.tmp.peer_sigalgslen)) {
                 pq_lu = key_pq_lu;
                 s->s3.tmp.pq_sigalg = pq_lu;
+                s->s3.tmp.hybrid_cert_type = server_type;
             }
         }
+
+        /*
+         * Server fallback: if no PQ signature algorithm was negotiated above
+         * (empty type intersection, no provisioned PQ key, or no acceptable
+         * algorithm pairing), clear the raw hybrid_cert capability flag. The
+         * EncryptedExtensions echo is already gated on
+         * SSL_CONNECTION_HYBRID_NEGOTIATED() (which also requires pq_sigalg), so
+         * it stays suppressed; but the single-certificate hybrid processing in
+         * statem_lib.c (transcript re-snapshot and Chameleon delta validation)
+         * keys off s3.tmp.hybrid_cert alone, and would otherwise treat this
+         * standard-TLS fallback as a hybrid handshake. Client-side selection
+         * does not populate hybrid_cert_offered and must keep the flag (the
+         * server echoed it), so this is scoped to s->server.
+         */
+        if (s->server && s->s3.tmp.pq_sigalg == NULL)
+            s->s3.tmp.hybrid_cert = 0;
     }
 
     return 1;

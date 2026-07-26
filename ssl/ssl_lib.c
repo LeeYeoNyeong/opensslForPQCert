@@ -8053,6 +8053,56 @@ int SSL_set_hybrid_cert_required(SSL *s, int required)
     return 1;
 }
 
+/*
+ * Restrict the set of hybrid certificate types this endpoint advertises in the
+ * hybrid_cert extension (client side). Each entry of |types| must be one of the
+ * TLSEXT_HYBRID_CERT_TYPE_* code points; duplicates are ignored. Passing NULL or
+ * ntypes == 0 resets to the default, which advertises all four defined types.
+ * Only the client advertises a set; the server derives its single provisioned
+ * type implicitly and ignores this value.
+ */
+static int ssl_cert_set_hybrid_cert_types(CERT *c, const uint8_t *types,
+                                          size_t ntypes)
+{
+    uint16_t set = 0;
+    size_t i;
+
+    if (types == NULL || ntypes == 0) {
+        c->hybrid_cert_types = 0; /* 0 => default all types */
+        return 1;
+    }
+    for (i = 0; i < ntypes; i++) {
+        if (!SSL_HYBRID_CERT_TYPE_VALID(types[i])) {
+            ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_INVALID_ARGUMENT);
+            return 0;
+        }
+        set |= SSL_HYBRID_CERT_TYPE_BIT(types[i]);
+    }
+    c->hybrid_cert_types = set;
+    return 1;
+}
+
+int SSL_CTX_set_hybrid_cert_types(SSL_CTX *ctx, const uint8_t *types,
+                                  size_t ntypes)
+{
+    if (ctx == NULL || ctx->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+    return ssl_cert_set_hybrid_cert_types(ctx->cert, types, ntypes);
+}
+
+int SSL_set_hybrid_cert_types(SSL *s, const uint8_t *types, size_t ntypes)
+{
+    SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(s);
+
+    if (sc == NULL || sc->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+    return ssl_cert_set_hybrid_cert_types(sc->cert, types, ntypes);
+}
+
 /* Set post-quantum certificate, private key and chain for dual certificate mode */
 int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF(X509) *chain)
 {

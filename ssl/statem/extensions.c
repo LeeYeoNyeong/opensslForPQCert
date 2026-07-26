@@ -1959,6 +1959,8 @@ static int init_hybrid_cert(SSL_CONNECTION *s, unsigned int context)
      * signal read by SSL_CONNECTION_HYBRID_NEGOTIATED(), so it must start NULL.
      */
     s->s3.tmp.hybrid_cert = 0;
+    s->s3.tmp.hybrid_cert_type = TLSEXT_HYBRID_CERT_TYPE_NONE;
+    s->s3.tmp.hybrid_cert_offered = 0;
     s->s3.tmp.pq_sigalg = NULL;
     return 1;
 }

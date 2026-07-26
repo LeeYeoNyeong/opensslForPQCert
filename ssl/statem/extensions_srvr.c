@@ -1282,14 +1282,40 @@ int tls_parse_ctos_hybrid_cert(SSL_CONNECTION *s, PACKET *pkt,
                                ossl_unused X509 *x,
                                ossl_unused size_t chainidx)
 {
-    /* Capability flag: the body MUST be empty. */
-    if (PACKET_remaining(pkt) != 0) {
+    PACKET type_list;
+    unsigned int type;
+    uint16_t offered = 0;
+
+    /*
+     * Type list: the body is a u8-length-prefixed list of hybrid certificate
+     * type code points the client can validate. It MUST be non-empty and
+     * consume the whole extension body. Unrecognised code points are skipped
+     * (forward compatibility): they simply do not join the offered set, so the
+     * server/client type intersection computed in tls_choose_sigalg still only
+     * ever contains types both sides understand.
+     */
+    if (!PACKET_get_length_prefixed_1(pkt, &type_list)
+            || PACKET_remaining(pkt) != 0
+            || PACKET_remaining(&type_list) == 0) {
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
         return 0;
     }
+    while (PACKET_remaining(&type_list) > 0) {
+        if (!PACKET_get_1(&type_list, &type)) {
+            SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
+            return 0;
+        }
+        if (SSL_HYBRID_CERT_TYPE_VALID(type))
+            offered |= SSL_HYBRID_CERT_TYPE_BIT(type);
+    }
 
-    /* Record that the client advertised hybrid-certificate capability. */
+    /*
+     * Record that the client advertised hybrid-certificate capability and the
+     * set of types it can validate. The single provisioned type is derived and
+     * intersected against this set later, in tls_choose_sigalg.
+     */
     s->s3.tmp.hybrid_cert = 1;
+    s->s3.tmp.hybrid_cert_offered = offered;
 
     return 1;
 }
@@ -1315,8 +1341,20 @@ EXT_RETURN tls_construct_stoc_hybrid_cert(SSL_CONNECTION *s, WPACKET *pkt,
     if (!SSL_CONNECTION_HYBRID_NEGOTIATED(s))
         return EXT_RETURN_NOT_SENT;
 
+    /*
+     * When hybrid is negotiated, tls_choose_sigalg has already derived the
+     * server's single provisioned type, confirmed it lies in the client's
+     * advertised set, and recorded it here. A negotiated connection therefore
+     * always carries a valid selected type; assert it and echo that one type.
+     */
+    if (!ossl_assert(SSL_HYBRID_CERT_TYPE_VALID(s->s3.tmp.hybrid_cert_type))) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        return EXT_RETURN_FAIL;
+    }
+
     if (!WPACKET_put_bytes_u16(pkt, TLSEXT_TYPE_hybrid_cert)
             || !WPACKET_start_sub_packet_u16(pkt)
+            || !WPACKET_put_bytes_u8(pkt, (unsigned char)s->s3.tmp.hybrid_cert_type)
             || !WPACKET_close(pkt)) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return EXT_RETURN_FAIL;

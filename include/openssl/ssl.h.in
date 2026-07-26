@@ -1805,6 +1805,10 @@ __owur int SSL_CTX_set_chameleon_delta_key(SSL_CTX *ctx, X509 *cert, EVP_PKEY *d
 __owur int SSL_set_chameleon_delta_key(SSL *s, X509 *cert, EVP_PKEY *deltakey);
 __owur int SSL_CTX_set_hybrid_cert_required(SSL_CTX *ctx, int required);
 __owur int SSL_set_hybrid_cert_required(SSL *s, int required);
+__owur int SSL_CTX_set_hybrid_cert_types(SSL_CTX *ctx, const uint8_t *types,
+                                         size_t ntypes);
+__owur int SSL_set_hybrid_cert_types(SSL *s, const uint8_t *types,
+                                     size_t ntypes);
 
 void SSL_CTX_set_default_passwd_cb(SSL_CTX *ctx, pem_password_cb *cb);
 void SSL_CTX_set_default_passwd_cb_userdata(SSL_CTX *ctx, void *u);

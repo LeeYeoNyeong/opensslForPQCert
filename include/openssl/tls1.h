@@ -160,13 +160,28 @@ extern "C" {
 # define TLSEXT_TYPE_key_share                   51
 # define TLSEXT_TYPE_quic_transport_parameters   57
 /*
- * Hybrid-certificate capability flag (zero-length payload), in the TLS
- * ExtensionType private-use range (65280-65535, RFC 8446). The client
- * advertises it in ClientHello; the server echoes it in EncryptedExtensions
- * (TLS 1.3 does not permit this extension in ServerHello). It carries no
- * format/algorithm data: algorithms are negotiated via signature_algorithms.
+ * Hybrid-certificate type negotiation, in the TLS ExtensionType private-use
+ * range (65280-65535, RFC 8446). The client advertises in ClientHello the list
+ * of hybrid certificate types it can validate (body: u8 count, then count u8
+ * type code points); the server intersects that list with the single type it is
+ * provisioned with, selects one, and echoes that single type in
+ * EncryptedExtensions (body: one u8 type code point). TLS 1.3 does not permit
+ * this extension in ServerHello. It carries only the certificate *format* type;
+ * signature algorithms are still negotiated via signature_algorithms.
  */
 # define TLSEXT_TYPE_hybrid_cert                 0xff51
+
+/*
+ * Hybrid certificate type code points carried in the hybrid_cert extension.
+ * These identify the certificate FORMAT only (not any traditional x PQC
+ * algorithm combination). This block is the single source of truth for the
+ * four defined types; 0 is reserved to mean "no type".
+ */
+# define TLSEXT_HYBRID_CERT_TYPE_NONE            0
+# define TLSEXT_HYBRID_CERT_TYPE_CHAMELEON       1
+# define TLSEXT_HYBRID_CERT_TYPE_CATALYST        2
+# define TLSEXT_HYBRID_CERT_TYPE_RELATED         3
+# define TLSEXT_HYBRID_CERT_TYPE_DUAL            4
 
 /* Temporary extension type */
 # define TLSEXT_TYPE_renegotiate                 0xff01

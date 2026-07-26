@@ -1242,17 +1242,46 @@ EXT_RETURN tls_construct_ctos_hybrid_cert(SSL_CONNECTION *s, WPACKET *pkt,
                                           ossl_unused size_t chainidx)
 {
 #ifndef OPENSSL_NO_TLS1_3
+    static const uint8_t all_types[] = {
+        TLSEXT_HYBRID_CERT_TYPE_CHAMELEON,
+        TLSEXT_HYBRID_CERT_TYPE_CATALYST,
+        TLSEXT_HYBRID_CERT_TYPE_RELATED,
+        TLSEXT_HYBRID_CERT_TYPE_DUAL,
+    };
+    uint16_t offered;
+    size_t i;
+
     /*
      * Advertise hybrid-certificate capability only if this endpoint is
-     * configured for hybrid certificates. The payload is empty: the extension
-     * is a pure capability flag and carries no format or algorithm data
-     * (algorithms are negotiated through signature_algorithms).
+     * configured for hybrid certificates. The body carries the list of hybrid
+     * certificate *format* types this client can validate; signature algorithms
+     * remain negotiated through signature_algorithms. When the caller did not
+     * restrict the set (cert->hybrid_cert_types == 0) all four defined types are
+     * advertised. The resolved set is not cached in s3.tmp because the extension
+     * init callback clears it before EncryptedExtensions is parsed; the EE echo
+     * is instead validated by recomputing this same set from cert.
      */
     if (!s->cert->hybrid_cert_enabled)
         return EXT_RETURN_NOT_SENT;
 
+    offered = s->cert->hybrid_cert_types != 0 ? s->cert->hybrid_cert_types
+                                              : SSL_HYBRID_CERT_TYPES_ALL;
+
     if (!WPACKET_put_bytes_u16(pkt, TLSEXT_TYPE_hybrid_cert)
             || !WPACKET_start_sub_packet_u16(pkt)
+            || !WPACKET_start_sub_packet_u8(pkt)) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        return EXT_RETURN_FAIL;
+    }
+    for (i = 0; i < OSSL_NELEM(all_types); i++) {
+        if ((offered & SSL_HYBRID_CERT_TYPE_BIT(all_types[i])) == 0)
+            continue;
+        if (!WPACKET_put_bytes_u8(pkt, all_types[i])) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+            return EXT_RETURN_FAIL;
+        }
+    }
+    if (!WPACKET_close(pkt) /* close the u8-length type list */
             || !WPACKET_close(pkt)) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return EXT_RETURN_FAIL;
@@ -1269,18 +1298,36 @@ int tls_parse_stoc_hybrid_cert(SSL_CONNECTION *s, PACKET *pkt,
                                ossl_unused X509 *x,
                                ossl_unused size_t chainidx)
 {
-    /* Capability-flag echo: the body MUST be empty. */
-    if (PACKET_remaining(pkt) != 0) {
+    unsigned int type;
+    uint16_t offered;
+
+    /*
+     * Type echo: the body MUST be exactly one code point, and it MUST be one of
+     * the types this client advertised in ClientHello. The extension framework
+     * only dispatches a server extension that the client actually offered, so
+     * reaching here means the server selected a hybrid certificate type; we
+     * still validate it is well-formed and within our advertised set so a
+     * malformed or off-list echo cannot silently negotiate a type we cannot
+     * validate. The advertised set is recomputed from cert (the same resolution
+     * tls_construct_ctos_hybrid_cert used) because the extension init callback
+     * cleared s3.tmp.hybrid_cert_offered before this EncryptedExtensions parse.
+     */
+    if (!PACKET_get_1(pkt, &type)
+            || PACKET_remaining(pkt) != 0) {
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
         return 0;
     }
+    offered = s->cert->hybrid_cert_types != 0 ? s->cert->hybrid_cert_types
+                                              : SSL_HYBRID_CERT_TYPES_ALL;
+    if (!SSL_HYBRID_CERT_TYPE_VALID(type)
+            || (offered & SSL_HYBRID_CERT_TYPE_BIT(type)) == 0) {
+        SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_BAD_EXTENSION);
+        return 0;
+    }
 
-    /*
-     * The extension framework only dispatches a server extension that the
-     * client actually offered, so reaching here means the server echoed our
-     * hybrid_cert flag: hybrid authentication has been negotiated.
-     */
+    /* Hybrid authentication has been negotiated for the selected type. */
     s->s3.tmp.hybrid_cert = 1;
+    s->s3.tmp.hybrid_cert_type = (int)type;
 
     return 1;
 }

@@ -297,6 +297,21 @@
      && (s)->s3.tmp.hybrid_cert != 0 \
      && (s)->s3.tmp.pq_sigalg != NULL)
 
+/* A hybrid certificate type code point is one of the four defined values. */
+# define SSL_HYBRID_CERT_TYPE_VALID(t) \
+    ((t) >= TLSEXT_HYBRID_CERT_TYPE_CHAMELEON \
+     && (t) <= TLSEXT_HYBRID_CERT_TYPE_DUAL)
+
+/* Bitmap position of a hybrid certificate type in an "offered" set. */
+# define SSL_HYBRID_CERT_TYPE_BIT(t) ((uint16_t)(1u << (t)))
+
+/* Default advertised set when a client did not restrict it: all four types. */
+# define SSL_HYBRID_CERT_TYPES_ALL \
+    (SSL_HYBRID_CERT_TYPE_BIT(TLSEXT_HYBRID_CERT_TYPE_CHAMELEON) \
+     | SSL_HYBRID_CERT_TYPE_BIT(TLSEXT_HYBRID_CERT_TYPE_CATALYST) \
+     | SSL_HYBRID_CERT_TYPE_BIT(TLSEXT_HYBRID_CERT_TYPE_RELATED) \
+     | SSL_HYBRID_CERT_TYPE_BIT(TLSEXT_HYBRID_CERT_TYPE_DUAL))
+
 /* See if we need explicit IV */
 # define SSL_USE_EXPLICIT_IV(s)  \
     (SSL_CONNECTION_GET_SSL(s)->method->ssl3_enc->enc_flags & SSL_ENC_FLAG_EXPLICIT_IV)
@@ -1410,11 +1425,31 @@ struct ssl_connection_st {
             size_t peer_sigalgslen;
             size_t peer_cert_sigalgslen;
             /*
-             * Set when the peer sent the hybrid_cert capability flag: on the
-             * server it means the client advertised it in ClientHello; on the
-             * client it means the server echoed it in EncryptedExtensions.
+             * Set when the peer sent the hybrid_cert extension: on the server it
+             * means the client advertised hybrid-certificate capability in
+             * ClientHello; on the client it means the server echoed a selected
+             * type in EncryptedExtensions. This stays a plain capability boolean
+             * regardless of the negotiated type below.
              */
             int hybrid_cert;
+            /*
+             * Negotiated hybrid certificate type (TLSEXT_HYBRID_CERT_TYPE_*,
+             * 0 = none). On the server it is the type derived in tls_choose_sigalg
+             * (implicitly, from the loaded key/cert state) once it is confirmed to
+             * lie in the client's advertised set; on the client it is the single
+             * type the server echoed in EncryptedExtensions.
+             */
+            int hybrid_cert_type;
+            /*
+             * Server side: bitmap (bit 1u << code) of the hybrid certificate
+             * types the client advertised in ClientHello, used in
+             * tls_choose_sigalg to intersect against the server's provisioned
+             * type. Set during ClientHello parsing and consumed in the same
+             * flight. The client does not use this field to validate the echo:
+             * the extension init callback clears it before EncryptedExtensions is
+             * parsed, so the client recomputes its advertised set from cert.
+             */
+            uint16_t hybrid_cert_offered;
             /* Sigalg peer actually uses */
             const struct sigalg_lookup_st *peer_sigalg;
             /*
@@ -2240,6 +2275,13 @@ typedef struct cert_st {
     X509_STORE *pq_chain_store;   /* Store pour construction chaîne PQC */
     int hybrid_cert_enabled;   /* Server is configured for hybrid certificates */
     int hybrid_cert_required;  /* Client strict policy: hybrid auth MUST complete */
+    /*
+     * Client advertised hybrid certificate type set: bitmap of
+     * (1u << TLSEXT_HYBRID_CERT_TYPE_*). 0 means "unset", in which case the
+     * client advertises all four defined types by default. Unused on the server,
+     * which derives its single provisioned type implicitly.
+     */
+    uint16_t hybrid_cert_types;
     /*
      * Catalyst single-certificate hybrid: the PQC private key whose public
      * counterpart lives in the main certificate's subjectAltPublicKeyInfo

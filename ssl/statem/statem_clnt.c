@@ -2176,6 +2176,44 @@ err:
 }
 
 /*
+ * Detect the hybrid certificate FORMAT actually presented by the peer, returned
+ * as a TLSEXT_HYBRID_CERT_TYPE_* code point (NONE if not a recognised hybrid
+ * format). This mirrors how each format is verified elsewhere in this function:
+ *   - multi-certificate (a PQC chain is present): a RelatedCertificate extension
+ *     on the PQC leaf marks Related; its absence marks Dual.
+ *   - single-certificate: a deltaCertificateDescriptor extension marks Chameleon;
+ *     a subjectAltPublicKeyInfo extension marks Catalyst.
+ * Used to bind the server-echoed hybrid_cert_type to the format on the wire so a
+ * peer cannot echo an allowed type while presenting a different, possibly
+ * un-advertised, format.
+ */
+static int client_detect_hybrid_cert_type(SSL_CONNECTION *s)
+{
+    X509 *leaf;
+
+    if (s->session->dual_certs_enabled && s->session->peer_pqc_chain != NULL
+            && sk_X509_num(s->session->peer_pqc_chain) > 0) {
+        X509 *pqc_leaf = sk_X509_value(s->session->peer_pqc_chain, 0);
+        RELATED_CERTIFICATE *rc = get_related_certificate_extension(pqc_leaf);
+
+        if (rc != NULL) {
+            RELATED_CERTIFICATE_free(rc);
+            return TLSEXT_HYBRID_CERT_TYPE_RELATED;
+        }
+        return TLSEXT_HYBRID_CERT_TYPE_DUAL;
+    }
+
+    leaf = sk_X509_value(s->session->peer_chain, 0);
+    if (leaf != NULL) {
+        if (X509_get_ext_by_NID(leaf, NID_id_ce_deltaCertificateDescriptor, -1) >= 0)
+            return TLSEXT_HYBRID_CERT_TYPE_CHAMELEON;
+        if (X509_get_ext_by_NID(leaf, NID_subject_alt_public_key_info, -1) >= 0)
+            return TLSEXT_HYBRID_CERT_TYPE_CATALYST;
+    }
+    return TLSEXT_HYBRID_CERT_TYPE_NONE;
+}
+
+/*
  * Verify the s->session->peer_chain and check server cert type.
  * On success set s->session->peer and s->session->verify_result.
  * Else the peer certificate verification callback may request retry.
@@ -2222,6 +2260,22 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
     ERR_pop_to_mark();      /* but we keep s->verify_result */
     if (i > 0 && s->rwstate == SSL_RETRY_VERIFY)
         return WORK_MORE_A;
+
+    /*
+     * Bind the server-echoed hybrid certificate type to the format actually
+     * received. When hybrid was negotiated and the server echoed a concrete
+     * type (already validated to lie within the set this client advertised in
+     * tls_parse_stoc_hybrid_cert), the certificate presented MUST be that
+     * format. Otherwise a peer could echo an allowed type (e.g. Dual) while
+     * presenting a different format (e.g. Chameleon), bypassing the client's
+     * advertised type restriction (SSL_set_hybrid_cert_types).
+     */
+    if (s->s3.tmp.hybrid_cert
+            && SSL_HYBRID_CERT_TYPE_VALID(s->s3.tmp.hybrid_cert_type)
+            && client_detect_hybrid_cert_type(s) != s->s3.tmp.hybrid_cert_type) {
+        SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_WRONG_CERTIFICATE_TYPE);
+        return WORK_ERROR;
+    }
 
     /*
      * Verify PQC certificate chain if dual certificates are enabled
