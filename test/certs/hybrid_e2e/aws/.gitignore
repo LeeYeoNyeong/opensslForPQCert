@@ -1,12 +1,16 @@
 # Resource identifiers, private keys and measurement data must never be committed.
-instances.json
-instances.json.terminated
+# instances.json* covers every variant (.terminated, .failed_*, partial dumps):
+# they all carry live instance IDs and public/private IPs.
+instances.json*
 *.pem
 *.pem.pub
 results/
-smoke.tgz
+*.tgz
 
-# Local run logs
+# Local run logs and scratch (helper scripts, backups, build logs)
 setup_logs/
 sanity_logs/
 run_logs/
+rebuild_logs/
+*.bak
+*.bak[0-9]
