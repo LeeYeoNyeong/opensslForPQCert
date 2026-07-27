@@ -5,8 +5,8 @@ post-quantum certificate formats** in TLS 1.3. It is the public reproduction
 artifact for the paper:
 
 > **From Standards to Practice: Benchmarking Hybrid PQC Certificates in TLS 1.3**
-> *IEEE Network* (to appear — final DOI / volume / issue will be added upon
-> publication).
+> Submitted to *IEEE Network* (under revision — bibliographic details will be
+> added if accepted).
 
 During the migration to post-quantum cryptography, certificates must often carry
 *both* a classical and a post-quantum signature so that the connection remains
@@ -228,14 +228,15 @@ preserved under the upstream `master` branch.
 
 ## Citation
 
-The paper is accepted at *IEEE Network*; the BibTeX entry below will be
-completed (authors, year, DOI) once the final publication details are assigned.
+The paper is currently under revision at *IEEE Network*; the BibTeX entry below
+will be completed (authors, year, DOI) once the paper is accepted and the final
+publication details are assigned.
 
 ```bibtex
 @article{hybridpqc-tls13,
   title   = {From Standards to Practice: Benchmarking Hybrid PQC Certificates in TLS 1.3},
   journal = {IEEE Network},
-  note    = {To appear}
+  note    = {Under revision}
 }
 ```
 
